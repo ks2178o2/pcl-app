@@ -1,0 +1,89 @@
+# PitCrew Labs Sales Co-Pilot Platform - Docker Compose
+
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:13
+    environment:
+      POSTGRES_DB: pitcrew_labs
+      POSTGRES_USER: pitcrew
+      POSTGRES_PASSWORD: pitcrew_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./enhanced_rag_context_schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+      - ./tenant_isolation_schema.sql:/docker-entrypoint-initdb.d/02-schema.sql
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pitcrew -d pitcrew_labs"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Backend API
+  backend:
+    build:
+      context: .
+      dockerfile: apps/app-api/Dockerfile
+    environment:
+      DATABASE_URL: postgresql://pitcrew:pitcrew_password@postgres:5432/pitcrew_labs
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_KEY: ${SUPABASE_KEY}
+      JWT_SECRET: ${JWT_SECRET}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./apps/app-api:/app
+    restart: unless-stopped
+
+  # Frontend
+  frontend:
+    build:
+      context: .
+      dockerfile: apps/realtime-gateway/Dockerfile
+    environment:
+      VITE_API_URL: http://localhost:8000
+      VITE_SUPABASE_URL: ${SUPABASE_URL}
+      VITE_SUPABASE_KEY: ${SUPABASE_KEY}
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  # Redis for caching (optional)
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+  # Nginx reverse proxy
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+      - ./ssl:/etc/nginx/ssl
+    depends_on:
+      - frontend
+      - backend
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  default:
+    name: pitcrew_labs_network

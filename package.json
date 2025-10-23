@@ -1,0 +1,75 @@
+{
+  "name": "pitcrew-labs-sales-copilot",
+  "version": "1.0.0",
+  "description": "Enterprise-grade AI-powered sales co-pilot platform with multi-tenant knowledge management",
+  "main": "index.js",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:backend": "cd apps/app-api && python -m uvicorn main:app --reload --port 8000",
+    "dev:frontend": "cd apps/realtime-gateway && npm run dev",
+    "build": "npm run build:frontend",
+    "build:frontend": "cd apps/realtime-gateway && npm run build",
+    "test": "npm run test:backend && npm run test:frontend",
+    "test:backend": "cd apps/app-api && python -m pytest",
+    "test:frontend": "cd apps/realtime-gateway && npm test",
+    "test:coverage": "npm run test:coverage:backend && npm run test:coverage:frontend",
+    "test:coverage:backend": "cd apps/app-api && python -m pytest --cov=. --cov-report=html",
+    "test:coverage:frontend": "cd apps/realtime-gateway && npm run test:coverage",
+    "test:ci": "./run_ci_tests.sh",
+    "test:rag": "./run_rag_tests.sh",
+    "lint": "npm run lint:frontend",
+    "lint:frontend": "cd apps/realtime-gateway && npm run lint",
+    "format": "npm run format:frontend",
+    "format:frontend": "cd apps/realtime-gateway && npm run format",
+    "setup": "npm run setup:backend && npm run setup:frontend",
+    "setup:backend": "cd apps/app-api && pip install -r requirements.txt",
+    "setup:frontend": "cd apps/realtime-gateway && npm install",
+    "db:setup": "python check_and_create_tables.py",
+    "db:migrate": "python setup_supabase.py",
+    "clean": "npm run clean:frontend && npm run clean:backend",
+    "clean:frontend": "cd apps/realtime-gateway && npm run clean",
+    "clean:backend": "cd apps/app-api && find . -type d -name __pycache__ -exec rm -rf {} +",
+    "deploy": "npm run build && npm run deploy:backend",
+    "deploy:backend": "cd apps/app-api && gunicorn main:app -w 4 -k uvicorn.workers.UvicornWorker",
+    "docker:build": "docker-compose build",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "docker:logs": "docker-compose logs -f"
+  },
+  "keywords": [
+    "sales",
+    "copilot",
+    "ai",
+    "rag",
+    "multi-tenant",
+    "enterprise",
+    "sales-intelligence",
+    "knowledge-management",
+    "fastapi",
+    "react",
+    "typescript",
+    "python"
+  ],
+  "author": "PitCrew Labs",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-org/pcl-app.git"
+  },
+  "bugs": {
+    "url": "https://github.com/your-org/pcl-app/issues"
+  },
+  "homepage": "https://github.com/your-org/pcl-app#readme",
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=8.0.0",
+    "python": ">=3.9.0"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  },
+  "workspaces": [
+    "apps/realtime-gateway",
+    "packages/shared"
+  ]
+}

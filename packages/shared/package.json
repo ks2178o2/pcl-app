@@ -1,0 +1,51 @@
+{
+  "name": "test-configuration",
+  "version": "1.0.0",
+  "description": "Test configuration for CI/CD pipeline",
+  "scripts": {
+    "test:ci": "npm run test:unit && npm run test:integration",
+    "test:unit": "vitest run --coverage --reporter=verbose",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:coverage": "vitest run --coverage --reporter=html",
+    "test:watch": "vitest --watch",
+    "test:debug": "vitest --inspect-brk"
+  },
+  "devDependencies": {
+    "vitest": "^1.0.0",
+    "@vitest/ui": "^1.0.0",
+    "@vitest/coverage-v8": "^1.0.0",
+    "@testing-library/react": "^14.0.0",
+    "@testing-library/jest-dom": "^6.0.0",
+    "@testing-library/user-event": "^14.0.0",
+    "jsdom": "^23.0.0",
+    "happy-dom": "^12.0.0"
+  },
+  "vitest": {
+    "testEnvironment": "jsdom",
+    "setupFiles": ["./src/test-setup.ts"],
+    "coverage": {
+      "provider": "v8",
+      "reporter": ["text", "json", "html", "lcov"],
+      "exclude": [
+        "node_modules/",
+        "dist/",
+        "**/*.d.ts",
+        "**/*.config.*",
+        "**/test-setup.*",
+        "**/__tests__/**",
+        "**/__mocks__/**"
+      ],
+      "thresholds": {
+        "global": {
+          "branches": 95,
+          "functions": 95,
+          "lines": 95,
+          "statements": 95
+        }
+      }
+    },
+    "testTimeout": 10000,
+    "hookTimeout": 10000,
+    "teardownTimeout": 10000
+  }
+}
