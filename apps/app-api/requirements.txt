@@ -22,7 +22,7 @@ python-multipart==0.0.6
 
 # HTTP Client
 httpx==0.25.2
-requests==2.31.0
+requests==2.32.4
 
 # Async Support
 asyncio==3.4.3
