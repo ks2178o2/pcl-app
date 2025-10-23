@@ -1,6 +1,6 @@
 [project]
 name = "pitcrew-labs-sales-copilot-backend"
-version = "1.0.0"
+version = "1.0.1-dev"
 description = "PitCrew Labs Sales Co-Pilot Platform - Backend API"
 authors = [
     {name = "PitCrew Labs", email = "dev@pitcrew-labs.com"}

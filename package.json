@@ -1,6 +1,6 @@
 {
   "name": "pitcrew-labs-sales-copilot",
-  "version": "1.0.0",
+  "version": "1.0.1-dev",
   "description": "Enterprise-grade AI-powered sales co-pilot platform with multi-tenant knowledge management",
   "main": "index.js",
   "scripts": {
