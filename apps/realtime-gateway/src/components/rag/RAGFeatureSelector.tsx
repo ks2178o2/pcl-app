@@ -4,11 +4,11 @@
  */
 
 import React, { useState, useMemo } from 'react';
-import { RAGFeatureSelectorProps, RAGFeatureCategory, getCategoryInfo } from '../types/rag-features';
-import { useEnabledRAGFeatures } from '../hooks/useRAGFeatures';
-import { Button } from '../components/ui/button';
-import { Input } from '../components/ui/input';
-import { Label } from '../components/ui/label';
+import { RAGFeatureSelectorProps, RAGFeatureCategory, getCategoryInfo } from '@/types/rag-features';
+import { useEnabledRAGFeatures } from '@/hooks/useRAGFeatures';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 
 // ==================== COMPONENT IMPLEMENTATION ====================
 

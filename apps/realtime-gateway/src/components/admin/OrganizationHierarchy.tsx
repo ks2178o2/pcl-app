@@ -5,10 +5,10 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { OrganizationHierarchyProps, OrganizationTreeNode } from '../types/rag-features';
+import { OrganizationHierarchyProps, OrganizationTreeNode } from '@/types/rag-features';
 import { ragFeaturesApi } from '@/lib/api/rag-features';
-import { Button } from '../components/ui/button';
-import { Card } from '../components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
 import { 
   ChevronRight, 
   ChevronDown, 

@@ -4,10 +4,10 @@
  */
 
 import React from 'react';
-import { RAGFeatureToggleCardProps, getCategoryInfo } from '../types/rag-features';
-import { Button } from '../components/ui/button';
-import { Card } from '../components/ui/card';
-import { Label } from '../components/ui/label';
+import { RAGFeatureToggleCardProps, getCategoryInfo } from '@/types/rag-features';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { Label } from '@/components/ui/label';
 
 // ==================== COMPONENT IMPLEMENTATION ====================
 

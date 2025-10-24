@@ -5,11 +5,11 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { SharingApprovalsProps, SharingRequest } from '../types/rag-features';
+import { SharingApprovalsProps, SharingRequest } from '@/types/rag-features';
 import { ragFeaturesApi } from '@/lib/api/rag-features';
-import { Button } from '../components/ui/button';
-import { Card } from '../components/ui/card';
-import { Input } from '../components/ui/input';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import { 
   CheckCircle, 
   XCircle, 

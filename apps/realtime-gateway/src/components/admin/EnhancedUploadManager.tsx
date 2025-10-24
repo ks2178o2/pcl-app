@@ -40,7 +40,8 @@ import {
   Trash2,
   RefreshCw
 } from 'lucide-react';
-import { RAGFeatureSelector } from '../rag/RAGFeatureSelector';
+import { RAGFeatureSelector } from '@/components/rag/RAGFeatureSelector';
+import { useAuth } from '@/hooks/useAuth';
 
 interface UploadResult {
   id: string;

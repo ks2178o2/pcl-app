@@ -9,8 +9,8 @@ import {
   RAGFeatureCategory,
   RAGFeatureSummary,
   UseRAGFeaturesReturn
-} from '../types/rag-features';
-import { ragFeaturesApi, handleApiError } from '../lib/api/rag-features';
+} from '@/types/rag-features';
+import { ragFeaturesApi, handleApiError } from '@/lib/api/rag-features';
 
 // ==================== HOOK IMPLEMENTATION ====================
 

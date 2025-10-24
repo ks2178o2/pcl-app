@@ -58,8 +58,9 @@ import {
   Clock,
   BarChart3
 } from 'lucide-react';
-import { RAGFeatureSelector } from '../rag/RAGFeatureSelector';
+import { RAGFeatureSelector } from '@/components/rag/RAGFeatureSelector';
 import { useUserRoles } from '@/hooks/useUserRoles';
+import { useAuth } from '@/hooks/useAuth';
 
 interface GlobalContextItem {
   id: string;

@@ -4,10 +4,10 @@
  */
 
 import React, { useState, useMemo } from 'react';
-import { RAGFeatureCategorySectionProps, RAGFeatureCategory, getCategoryInfo } from '../types/rag-features';
+import { RAGFeatureCategorySectionProps, RAGFeatureCategory, getCategoryInfo } from '@/types/rag-features';
 import { RAGFeatureToggleCard, CompactRAGFeatureToggleCard } from './RAGFeatureToggleCard';
-import { Button } from '../components/ui/button';
-import { Card } from '../components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
 
 // ==================== COMPONENT IMPLEMENTATION ====================
 
