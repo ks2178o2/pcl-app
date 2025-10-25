@@ -1,7 +1,7 @@
 {
   "name": "realtime-gateway",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Real-time gateway with WebSocket/SSE termination and sticky sessions",
   "type": "module",
   "scripts": {
