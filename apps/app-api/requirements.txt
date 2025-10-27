@@ -7,7 +7,7 @@ gunicorn==21.2.0
 
 # Database & ORM
 supabase==2.3.0
-psycopg2-binary==2.9.9
+#psycopg2-binary==2.9.9
 sqlalchemy==2.0.23
 alembic==1.13.1
 
