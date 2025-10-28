@@ -5,8 +5,9 @@ fastapi==0.104.1
 uvicorn[standard]==0.24.0
 gunicorn==21.2.0
 
-# Database & ORM
-supabase==2.3.0
+# Database & ORM - UPGRADED VERSIONS
+supabase==2.9.0
+httpx[http2]==0.27.0
 sqlalchemy==2.0.23
 alembic==1.13.1
 
@@ -19,8 +20,7 @@ python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
 python-multipart==0.0.6
 
-# HTTP Client (supabase will handle httpx version)
-httpx
+# HTTP Client
 requests==2.31.0
 
 # Async Support
