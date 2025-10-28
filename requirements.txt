@@ -1,16 +1,17 @@
 # Core Framework
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
+fastapi==0.120.0
+uvicorn[standard]==0.38.0
 gunicorn==21.2.0
 
 # Database
-supabase
+supabase==2.22.2
 
 # Data Validation
 pydantic==2.5.0
 pydantic-settings==2.1.0
 
 # HTTP Client
+httpx==0.28.1
 requests==2.31.0
 
 # Environment
