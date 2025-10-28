@@ -1,4 +1,4 @@
-# Core Framework
+# Core Framework  
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
 gunicorn==21.2.0
@@ -11,6 +11,7 @@ pydantic==2.5.0
 pydantic-settings==2.1.0
 
 # HTTP Client
+httpx==0.24.1
 requests==2.31.0
 
 # Environment
