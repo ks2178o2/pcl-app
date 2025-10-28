@@ -1,0 +1,4 @@
+Retrieving logs...
+Logs were saved to /Users/scottmatthews/Documents/hero/.elasticbeanstalk/logs/251027_174112
+Logs were saved to /Users/scottmatthews/Documents/hero/.elasticbeanstalk/logs/251027_174112
+Updated symlink at /Users/scottmatthews/Documents/hero/.elasticbeanstalk/logs/latest

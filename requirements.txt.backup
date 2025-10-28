@@ -1,0 +1,94 @@
+# PitCrew Labs Sales Co-Pilot Platform - Backend Dependencies
+
+# Core Framework
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+gunicorn==21.2.0
+
+# Database & ORM
+supabase==2.3.0
+#psycopg2-binary==2.9.9
+sqlalchemy==2.0.23
+alembic==1.13.1
+
+# Data Validation & Serialization
+pydantic==2.5.0
+pydantic-settings==2.1.0
+
+# Authentication & Security
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+python-multipart==0.0.6
+
+# HTTP Client
+httpx==0.25.2
+requests==2.31.0
+
+# Async Support
+asyncio==3.4.3
+aiofiles==23.2.1
+
+# Testing
+pytest==7.4.3
+pytest-asyncio==0.21.1
+pytest-cov==4.1.0
+pytest-mock==3.12.0
+httpx==0.25.2
+
+# Code Quality
+black==23.11.0
+flake8==6.1.0
+isort==5.12.0
+mypy==1.7.1
+
+# Logging & Monitoring
+structlog==23.2.0
+sentry-sdk[fastapi]==1.38.0
+
+# Environment Management
+python-dotenv==1.0.0
+
+# Date & Time
+python-dateutil==2.8.2
+
+# File Processing
+python-magic==0.4.27
+PyPDF2==3.0.1
+python-docx==1.1.0
+
+# Web Scraping
+beautifulsoup4==4.12.2
+requests-html==0.10.0
+
+# Data Processing
+pandas==2.1.4
+numpy==1.25.2
+
+# Caching
+redis==5.0.1
+
+# Background Tasks
+celery==5.3.4
+
+# Email
+fastapi-mail==1.4.1
+
+# File Upload
+python-multipart==0.0.6
+
+# CORS
+fastapi-cors==0.0.6
+
+# Rate Limiting
+slowapi==0.1.9
+
+# Health Checks
+fastapi-health==0.1.0
+
+# Metrics
+prometheus-client==0.19.0
+
+# Development Tools
+watchdog==3.0.0
+
+uvicorn[standard]==0.24.0
