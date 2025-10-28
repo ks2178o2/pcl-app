@@ -1,1 +1,2 @@
-web: cd apps/app-api && gunicorn main:app -w 4 -k uvicorn.workers.UvicornWorker --bind :8000
+web: gunicorn --chdir apps/app-api main:app --workers 4 --worker-class uvicorn.workers.UvicornWorker --bind :8000
+
