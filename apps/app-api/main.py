@@ -25,8 +25,20 @@ security = HTTPBearer()
 SUPABASE_URL = os.getenv("SUPABASE_URL", "https://xxdahmkfioqzgqvyabek.supabase.co")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 
-# Create Supabase client
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY) if SUPABASE_SERVICE_KEY else None
+# Defer Supabase client creation
+supabase: Client = None
+
+def get_supabase_client():
+    """Lazy initialization of Supabase client"""
+    global supabase
+    if supabase is None and SUPABASE_SERVICE_KEY:
+        try:
+            supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+            logger.info("Supabase client initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize Supabase client: {e}")
+            # Continue without Supabase - app will work in degraded mode
+    return supabase
 
 # Create FastAPI application
 app = FastAPI(
@@ -57,7 +69,8 @@ app.add_middleware(
 # Authentication dependency
 async def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
     """Verify JWT token with Supabase"""
-    if not supabase:
+    supabase_client = get_supabase_client()
+    if not supabase_client:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Authentication service unavailable"
@@ -65,7 +78,7 @@ async def verify_token(credentials: HTTPAuthorizationCredentials = Depends(secur
     
     try:
         # Verify the token with Supabase
-        response = supabase.auth.get_user(credentials.credentials)
+        response = supabase_client.auth.get_user(credentials.credentials)
         if not response.user:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -84,12 +97,13 @@ async def verify_token(credentials: HTTPAuthorizationCredentials = Depends(secur
 # Organization validation dependency
 async def verify_organization_access(user, org_id: str):
     """Verify user has access to the organization"""
-    if not supabase:
+    supabase_client = get_supabase_client()
+    if not supabase_client:
         return True  # Skip validation if Supabase not configured
     
     try:
         # Check if user belongs to the organization
-        response = supabase.table("profiles").select("organization_id").eq("user_id", user.id).single().execute()
+        response = supabase_client.table("profiles").select("organization_id").eq("user_id", user.id).single().execute()
         
         if not response.data or response.data.get("organization_id") != org_id:
             raise HTTPException(
