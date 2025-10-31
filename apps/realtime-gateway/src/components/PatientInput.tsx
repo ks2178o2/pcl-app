@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { useAppointments } from '@/hooks/useAppointments';
 import { usePatients } from '@/hooks/usePatients';
 import { usePatientSearch } from '@/hooks/usePatientSearch';
+import { useCenterSession } from '@/hooks/useCenterSession';
 import { format, isToday, isTomorrow, isThisWeek } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
 interface PatientInputProps {
@@ -42,6 +43,7 @@ export const PatientInput: React.FC<PatientInputProps> = ({
   } = usePatients();
   const { toast } = useToast();
   const { results: searchResults, search, clear: clearSearch } = usePatientSearch();
+  const { activeCenter } = useCenterSession();  // Get active center for patient creation
   const [query, setQuery] = useState('');
 
   const handleSearchSubmit = async () => {
@@ -83,7 +85,8 @@ export const PatientInput: React.FC<PatientInputProps> = ({
       const patient = await createPatient({
         name: newPatientName.trim(),
         email: newPatientEmail.trim() || undefined,
-        phone: newPatientPhone.trim() || undefined
+        phone: newPatientPhone.trim() || undefined,
+        center_id: activeCenter || undefined,  // Assign to active center if available
       });
       onChange({ id: patient.id, name: patient.name });
       setShowCreateDialog(false);

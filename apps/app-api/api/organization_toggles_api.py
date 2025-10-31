@@ -9,9 +9,9 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel, Field
 from datetime import datetime
 
-from ..services.supabase_client import get_supabase_client
-from ..services.tenant_isolation_service import TenantIsolationService
-from ..middleware.permissions import (
+from services.supabase_client import get_supabase_client
+from services.tenant_isolation_service import TenantIsolationService
+from middleware.permissions import (
     require_org_admin,
     require_admin_access,
     PermissionChecker,
@@ -84,7 +84,7 @@ def get_current_user():
 @router.get("/{org_id}/rag-toggles", response_model=RAGToggleListResponse)
 async def get_organization_rag_toggles(
     org_id: str,
-    category: Optional[str] = Query(None, regex="^(sales|manager|admin)$"),
+    category: Optional[str] = Query(None, pattern="^(sales|manager|admin)$"),
     enabled_only: bool = Query(False),
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0),
@@ -308,7 +308,7 @@ async def bulk_update_organization_rag_toggles(
 @router.get("/{org_id}/rag-toggles/enabled", response_model=EnabledFeaturesResponse)
 async def get_enabled_rag_features(
     org_id: str,
-    category: Optional[str] = Query(None, regex="^(sales|manager|admin)$"),
+    category: Optional[str] = Query(None, pattern="^(sales|manager|admin)$"),
     tenant_service=Depends(get_tenant_isolation_service),
     current_user=Depends(get_current_user)
 ):

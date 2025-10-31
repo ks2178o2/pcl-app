@@ -9,8 +9,8 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel, Field
 from datetime import datetime
 
-from ..services.supabase_client import get_supabase_client
-from ..middleware.permissions import (
+from services.supabase_client import get_supabase_client
+from middleware.permissions import (
     require_system_admin, 
     require_org_admin,
     PermissionChecker,
@@ -29,7 +29,7 @@ class RAGFeatureMetadata(BaseModel):
     rag_feature: str = Field(..., min_length=1, max_length=100)
     name: str = Field(..., min_length=1, max_length=200)
     description: Optional[str] = None
-    category: str = Field(..., regex="^(sales|manager|admin)$")
+    category: str = Field(..., pattern="^(sales|manager|admin)$")
     icon: Optional[str] = Field(None, max_length=100)
     color: Optional[str] = Field(None, max_length=20)
     is_active: bool = True
@@ -43,7 +43,7 @@ class RAGFeatureCreateRequest(BaseModel):
     rag_feature: str = Field(..., min_length=1, max_length=100)
     name: str = Field(..., min_length=1, max_length=200)
     description: Optional[str] = None
-    category: str = Field(..., regex="^(sales|manager|admin)$")
+    category: str = Field(..., pattern="^(sales|manager|admin)$")
     icon: Optional[str] = Field(None, max_length=100)
     color: Optional[str] = Field(None, max_length=20)
 
@@ -51,7 +51,7 @@ class RAGFeatureUpdateRequest(BaseModel):
     """Request model for updating RAG features"""
     name: Optional[str] = Field(None, min_length=1, max_length=200)
     description: Optional[str] = None
-    category: Optional[str] = Field(None, regex="^(sales|manager|admin)$")
+    category: Optional[str] = Field(None, pattern="^(sales|manager|admin)$")
     icon: Optional[str] = Field(None, max_length=100)
     color: Optional[str] = Field(None, max_length=20)
     is_active: Optional[bool] = None
@@ -85,7 +85,7 @@ def get_current_user():
 
 @router.get("/catalog", response_model=RAGFeatureListResponse)
 async def get_rag_feature_catalog(
-    category: Optional[str] = Query(None, regex="^(sales|manager|admin)$"),
+    category: Optional[str] = Query(None, pattern="^(sales|manager|admin)$"),
     is_active: Optional[bool] = Query(None),
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0),

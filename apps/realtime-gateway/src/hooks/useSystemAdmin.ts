@@ -8,7 +8,7 @@ interface CreateUserData {
   password: string;
   name: string;
   roles: Array<'doctor' | 'salesperson' | 'coach' | 'leader' | 'org_admin' | 'system_admin'>;
-  center_id?: string;
+  center_ids?: string[];  // Support multiple centers
   region_id?: string;
   organization_id?: string;
 }
@@ -173,11 +173,12 @@ export const useSystemAdmin = () => {
     setLoading(true);
     try {
       // Create user account
+      const siteUrl = (import.meta as any)?.env?.VITE_SITE_URL || (typeof window !== 'undefined' ? window.location.origin : '');
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: userData.email,
         password: userData.password,
         options: {
-          emailRedirectTo: `${window.location.origin}/`,
+          emailRedirectTo: siteUrl ? `${siteUrl}/` : undefined,
           data: {
             name: userData.name
           }
@@ -206,17 +207,44 @@ export const useSystemAdmin = () => {
       }
 
 
-      // Create user assignments
-      if (userData.center_id || userData.region_id || userData.organization_id) {
-        const assignmentData: any = { user_id: authData.user.id };
-        if (userData.center_id) assignmentData.center_id = userData.center_id;
-        if (userData.region_id) assignmentData.region_id = userData.region_id;
-        if (userData.organization_id) assignmentData.organization_id = userData.organization_id;
-
+      // Create user assignments - support multiple centers
+      const assignments = [];
+      
+      // Create one assignment per selected center
+      if (userData.center_ids && userData.center_ids.length > 0) {
+        for (const centerId of userData.center_ids) {
+          assignments.push({
+            user_id: authData.user.id,
+            center_id: centerId,
+            role: 'salesperson' // Default role for center assignments
+          });
+        }
+      }
+      
+      // Create one assignment per selected region
+      if (userData.region_id) {
+        assignments.push({
+          user_id: authData.user.id,
+          region_id: userData.region_id,
+          role: 'salesperson'
+        });
+      }
+      
+      // Or organization-level assignment (if no center/region assignments)
+      if (assignments.length === 0 && userData.organization_id) {
+        assignments.push({
+          user_id: authData.user.id,
+          organization_id: userData.organization_id,
+          role: 'salesperson'
+        });
+      }
+      
+      // Insert all assignments at once
+      if (assignments.length > 0) {
         const { error: assignmentError } = await supabase
           .from('user_assignments')
-          .insert([assignmentData]);
-
+          .insert(assignments);
+        
         if (assignmentError) throw assignmentError;
       }
 

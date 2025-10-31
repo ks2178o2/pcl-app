@@ -28,7 +28,8 @@ export const useAuth = () => {
   }, []);
 
   const signUp = async (email: string, password: string, salespersonName: string, organizationId: string) => {
-    const redirectUrl = `${window.location.origin}/`;
+    const siteUrl = (import.meta as any)?.env?.VITE_SITE_URL || (typeof window !== 'undefined' ? window.location.origin : '');
+    const redirectUrl = siteUrl ? `${siteUrl}/` : undefined;
     
     const { error } = await supabase.auth.signUp({
       email,
@@ -58,7 +59,8 @@ export const useAuth = () => {
   };
 
   const resetPassword = async (email: string) => {
-    const redirectUrl = `${window.location.origin}/`;
+    const siteUrl = (import.meta as any)?.env?.VITE_SITE_URL || (typeof window !== 'undefined' ? window.location.origin : '');
+    const redirectUrl = siteUrl ? `${siteUrl}/` : undefined;
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: redirectUrl
     });

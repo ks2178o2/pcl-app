@@ -17,6 +17,7 @@ interface CreatePatientData {
   name: string;
   email?: string;
   phone?: string;
+  center_id?: string;  // Optional center assignment
 }
 
 export const usePatients = () => {
@@ -77,6 +78,7 @@ export const usePatients = () => {
           full_name: patientData.name,
           email: patientData.email ?? null,
           phone: patientData.phone ?? null,
+          center_id: patientData.center_id ?? null,  // Set center_id if provided
         }])
         .select('id, full_name, email, phone, friendly_id, created_at, updated_at')
         .single();

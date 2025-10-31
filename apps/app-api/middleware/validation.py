@@ -8,7 +8,7 @@ from typing import Dict, Any, List, Optional, Tuple
 from functools import wraps
 import asyncio
 
-from .supabase_client import get_supabase_client
+from services.supabase_client import get_supabase_client
 from .permissions import PermissionChecker, UserRole
 
 logger = logging.getLogger(__name__)
