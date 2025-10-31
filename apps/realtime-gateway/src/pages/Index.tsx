@@ -154,6 +154,18 @@ const Index = () => {
                   patientId={selectedPatient.id}
                   centerId={activeCenter || undefined} 
                 />
+                {/* User feedback for disabled button */}
+                {(!selectedPatient.name.trim() || !activeCenter) && (
+                  <div className="text-sm text-muted-foreground mt-2">
+                    {!selectedPatient.name.trim() && !activeCenter ? (
+                      "Please select a patient and center to start recording"
+                    ) : !selectedPatient.name.trim() ? (
+                      "Please select a patient to start recording"
+                    ) : (
+                      "Please select a center to start recording"
+                    )}
+                  </div>
+                )}
               </TabsContent>
               
               <TabsContent value="quick" className="mt-4 space-y-4">
@@ -166,6 +178,18 @@ const Index = () => {
                   </div>
                 </div>
                 <AudioRecorder onRecordingComplete={handleRecordingComplete} disabled={!selectedPatient.name.trim() || !activeCenter} patientName={selectedPatient.name} />
+                {/* User feedback for disabled button */}
+                {(!selectedPatient.name.trim() || !activeCenter) && (
+                  <div className="text-sm text-muted-foreground mt-2">
+                    {!selectedPatient.name.trim() && !activeCenter ? (
+                      "Please select a patient and center to start recording"
+                    ) : !selectedPatient.name.trim() ? (
+                      "Please select a patient to start recording"
+                    ) : (
+                      "Please select a center to start recording"
+                    )}
+                  </div>
+                )}
               </TabsContent>
               
               <TabsContent value="upload" className="mt-4 space-y-4">

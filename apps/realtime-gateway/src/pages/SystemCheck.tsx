@@ -1,10 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { CheckCircle, XCircle, AlertCircle, RefreshCw } from 'lucide-react';
+import { CheckCircle, XCircle, AlertCircle, RefreshCw, Clock } from 'lucide-react';
 
 interface SystemCheckResult {
   name: string;
@@ -16,6 +16,9 @@ interface SystemCheckResult {
 export default function SystemCheck() {
   const [checks, setChecks] = useState<SystemCheckResult[]>([]);
   const [loading, setLoading] = useState(false);
+  const [lastChecked, setLastChecked] = useState<Date | null>(null);
+  const [autoRefresh, setAutoRefresh] = useState(true);
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const { user, session } = useAuth();
 
   const runSystemChecks = async () => {
@@ -211,10 +214,191 @@ export default function SystemCheck() {
       });
     }
 
+    // Check RAG Features Table
+    try {
+      const { error } = await supabase.from('rag_feature_catalog').select('count').limit(1);
+      results.push({
+        name: 'RAG Features Table',
+        status: error ? 'warning' : 'pass',
+        message: error ? 'RAG features table not accessible' : 'RAG features table accessible',
+        details: error?.message || 'Table exists and is queryable'
+      });
+    } catch (err) {
+      results.push({
+        name: 'RAG Features Table',
+        status: 'warning',
+        message: 'Could not access RAG features table',
+        details: err instanceof Error ? err.message : 'Unknown error'
+      });
+    }
+
+    // Check Organization RAG Toggles
+    try {
+      const { error } = await supabase.from('organization_rag_toggles').select('count').limit(1);
+      results.push({
+        name: 'Organization RAG Toggles',
+        status: error ? 'warning' : 'pass',
+        message: error ? 'Organization RAG toggles not accessible' : 'Organization RAG toggles accessible',
+        details: error?.message || 'Table exists and is queryable'
+      });
+    } catch (err) {
+      results.push({
+        name: 'Organization RAG Toggles',
+        status: 'warning',
+        message: 'Could not access organization RAG toggles',
+        details: err instanceof Error ? err.message : 'Unknown error'
+      });
+    }
+
+    // Check Global Context Table
+    try {
+      const { error } = await supabase.from('global_context_items').select('count').limit(1);
+      results.push({
+        name: 'Global Context Items',
+        status: error ? 'warning' : 'pass',
+        message: error ? 'Global context table not accessible' : 'Global context table accessible',
+        details: error?.message || 'Table exists and is queryable'
+      });
+    } catch (err) {
+      results.push({
+        name: 'Global Context Items',
+        status: 'warning',
+        message: 'Could not access global context table',
+        details: err instanceof Error ? err.message : 'Unknown error'
+      });
+    }
+
+    // Check Patients Table (New)
+    try {
+      const { error } = await supabase.from('patients').select('count').limit(1);
+      results.push({
+        name: 'Patients Table',
+        status: error ? 'fail' : 'pass',
+        message: error ? 'Patients table not accessible' : 'Patients table accessible',
+        details: error?.message || 'Table exists and is queryable'
+      });
+    } catch (err) {
+      results.push({
+        name: 'Patients Table',
+        status: 'fail',
+        message: 'Could not access patients table',
+        details: err instanceof Error ? err.message : 'Unknown error'
+      });
+    }
+
+    // Check Backend API
+    try {
+      const apiUrl = (import.meta as any)?.env?.VITE_API_URL || 'http://localhost:8000';
+      const response = await fetch(`${apiUrl}/health`);
+      const data = await response.json();
+      results.push({
+        name: 'Backend API',
+        status: response.ok ? 'pass' : 'warning',
+        message: response.ok ? 'Backend API responding' : 'Backend API error',
+        details: response.ok ? `Version: ${data.version || 'Unknown'}` : `Status: ${response.status}`
+      });
+    } catch (err) {
+      results.push({
+        name: 'Backend API',
+        status: 'warning',
+        message: 'Backend API not accessible',
+        details: err instanceof Error ? err.message : 'Ensure backend is running on port 8000'
+      });
+    }
+
+    // Check RAG Feature Toggles API
+    try {
+      const apiUrl = (import.meta as any)?.env?.VITE_API_URL || 'http://localhost:8000';
+      const response = await fetch(`${apiUrl}/api/v1/rag-features/catalog?is_active=true`);
+      results.push({
+        name: 'RAG Features API',
+        status: response.ok ? 'pass' : 'warning',
+        message: response.ok ? 'RAG features API responding' : 'RAG features API error',
+        details: response.ok ? 'Catalog endpoint accessible' : `Status: ${response.status}`
+      });
+    } catch (err) {
+      results.push({
+        name: 'RAG Features API',
+        status: 'warning',
+        message: 'RAG features API not accessible',
+        details: err instanceof Error ? err.message : 'Ensure backend is running'
+      });
+    }
+
+    // Check AI Service Endpoints
+    const aiServices = [
+      { 
+        name: 'OpenAI API',
+        endpoint: 'https://api.openai.com/v1/models',
+        expectedStatus: 200,
+        headers: {} // Add your API key if needed
+      },
+      { 
+        name: 'Deepgram API',
+        endpoint: 'https://api.deepgram.com/v1/projects',
+        expectedStatus: 200,
+        headers: {} // Add your API key if needed
+      },
+      { 
+        name: 'AssemblyAI API',
+        endpoint: 'https://api.assemblyai.com/v2/transcript',
+        expectedStatus: 400, // Returns 400 for missing transcript ID, but endpoint is accessible
+        headers: {} // Add your API key if needed
+      }
+    ];
+
+    for (const service of aiServices) {
+      try {
+        const response = await fetch(service.endpoint, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+            ...service.headers
+          }
+        });
+        
+        const isAccessible = response.status === service.expectedStatus || response.status < 500;
+        results.push({
+          name: `AI Service: ${service.name}`,
+          status: isAccessible ? 'pass' : 'warning',
+          message: isAccessible ? `${service.name} endpoint responding` : `${service.name} endpoint error`,
+          details: `Status: ${response.status} - ${response.status === service.expectedStatus ? 'Expected response' : 'Unexpected response'}`
+        });
+      } catch (err) {
+        results.push({
+          name: `AI Service: ${service.name}`,
+          status: 'warning',
+          message: `${service.name} not accessible`,
+          details: err instanceof Error ? err.message : 'Ensure AI service is configured'
+        });
+      }
+    }
+
     setChecks(results);
     setLoading(false);
+    setLastChecked(new Date());
   };
 
+  // Auto-refresh logic
+  useEffect(() => {
+    if (autoRefresh) {
+      intervalRef.current = setInterval(() => {
+        runSystemChecks();
+      }, 60000); // Refresh every 60 seconds
+    } else {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+    }
+
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+    };
+  }, [autoRefresh, user, session]);
+
+  // Initial check on mount
   useEffect(() => {
     runSystemChecks();
   }, [user, session]);
@@ -253,11 +437,29 @@ export default function SystemCheck() {
   return (
     <div className="container mx-auto p-6 space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold">System Health Check</h1>
-        <Button onClick={runSystemChecks} disabled={loading} className="flex items-center gap-2">
-          <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-          Run Check
-        </Button>
+        <div>
+          <h1 className="text-3xl font-bold">System Health Check</h1>
+          {lastChecked && (
+            <p className="text-sm text-muted-foreground mt-1">
+              <Clock className="inline h-3 w-3 mr-1" />
+              Last checked: {lastChecked.toLocaleTimeString()}
+            </p>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <Button 
+            variant={autoRefresh ? "default" : "outline"}
+            onClick={() => setAutoRefresh(!autoRefresh)}
+            className="flex items-center gap-2"
+          >
+            <RefreshCw className={`h-4 w-4 ${autoRefresh ? 'animate-spin' : ''}`} />
+            Auto Refresh
+          </Button>
+          <Button onClick={runSystemChecks} disabled={loading} className="flex items-center gap-2">
+            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+            Run Check Now
+          </Button>
+        </div>
       </div>
 
       <Card>

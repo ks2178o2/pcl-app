@@ -62,7 +62,7 @@ export const UserManagement = () => {
       password: formData.password,
       name: formData.name,
       roles: formData.roles as ('doctor' | 'salesperson' | 'coach' | 'leader' | 'org_admin' | 'system_admin')[],
-      center_id: formData.centerIds.length > 0 ? formData.centerIds[0] : undefined,
+      center_ids: formData.centerIds.length > 0 ? formData.centerIds : undefined,
       region_id: formData.regionIds.length > 0 ? formData.regionIds[0] : undefined,
       organization_id: formData.organizationId || undefined,
     };

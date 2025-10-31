@@ -48,7 +48,7 @@ services:
       context: .
       dockerfile: apps/realtime-gateway/Dockerfile
     environment:
-      VITE_API_URL: http://localhost:8000
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
       VITE_SUPABASE_URL: ${SUPABASE_URL}
       VITE_SUPABASE_KEY: ${SUPABASE_KEY}
     ports:

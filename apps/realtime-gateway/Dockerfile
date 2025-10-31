@@ -29,7 +29,9 @@ EXPOSE 80
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost/health || exit 1
+    ARG HEALTHCHECK_URL
+    ENV HEALTHCHECK_URL=${HEALTHCHECK_URL}
+    CMD curl -f ${HEALTHCHECK_URL:-http://localhost/health} || exit 1
 
 # Start nginx
 CMD ["nginx", "-g", "daemon off;"]

@@ -49,13 +49,8 @@ app = FastAPI(
     redoc_url="/redoc" if os.getenv("ENVIRONMENT") == "development" else None,
 )
 
-# Configure CORS properly
-ALLOWED_ORIGINS = [
-    "http://localhost:3000",
-    "http://localhost:3005", 
-    "https://your-production-domain.com",  # Replace with your actual domain
-    "https://your-staging-domain.com",    # Replace with your actual staging domain
-]
+# Configure CORS properly - allow env override
+ALLOWED_ORIGINS = [origin.strip() for origin in os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:3005").split(",")]
 
 # Add CORS middleware with proper configuration
 app.add_middleware(

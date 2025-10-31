@@ -13,6 +13,7 @@ import { Search, Plus, User } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { usePatients } from '@/hooks/usePatients';
 import { usePatientSearch } from '@/hooks/usePatientSearch';
+import { useCenterSession } from '@/hooks/useCenterSession';
 
 // Validation schema for patient creation
 const patientSchema = z.object({
@@ -53,6 +54,7 @@ export const PatientSelector: React.FC<PatientSelectorProps> = ({
   
   const { patients, loading: patientsLoading, createPatient } = usePatients();
   const { search, loading: searchLoading, error: searchError } = usePatientSearch();
+  const { activeCenter } = useCenterSession();  // Get active center for patient creation
 
   const form = useForm<PatientFormData>({
     resolver: zodResolver(patientSchema),
@@ -99,6 +101,7 @@ export const PatientSelector: React.FC<PatientSelectorProps> = ({
         name: data.name.trim(),
         email: data.email?.trim() || undefined,
         phone: data.phone?.trim() || undefined,
+        center_id: activeCenter || undefined,  // Assign to active center if available
       });
 
       onPatientSelect(newPatient);
