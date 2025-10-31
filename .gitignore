@@ -402,3 +402,4 @@ pnpm-lock.yaml
 .local/
 local/
 .elasticbeanstalk/app_versions/
+!apps/realtime-gateway/src/lib/
