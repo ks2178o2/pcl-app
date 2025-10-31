@@ -401,3 +401,4 @@ pnpm-lock.yaml
 # ===========================================
 .local/
 local/
+.elasticbeanstalk/app_versions/
