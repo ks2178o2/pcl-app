@@ -8,6 +8,8 @@ import { RecordingStateProvider } from "@/providers/RecordingStateProvider";
 import Index from "./pages/Index";
 import { VoiceProfile } from "./pages/VoiceProfile";
 import Auth from "./pages/Auth";
+import AcceptInvitation from "./pages/AcceptInvitation";
+import SecuritySettings from "./pages/SecuritySettings";
 import { CallsSearch } from "./pages/CallsSearch";
 import { CallAnalysisPage } from "./pages/CallAnalysis";
 import Appointments from "./pages/Appointments";
@@ -42,6 +44,8 @@ const App = () => (
             <Route path="/patient/:patientName" element={<PatientDetails />} />
             <Route path="/analysis/:callId" element={<CallAnalysisPage />} />
             <Route path="/auth" element={<Auth />} />
+            <Route path="/accept-invitation" element={<AcceptInvitation />} />
+            <Route path="/security-settings" element={<SecuritySettings />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
             </Routes>

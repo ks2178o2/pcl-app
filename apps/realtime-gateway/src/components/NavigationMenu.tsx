@@ -8,7 +8,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Menu, Home, Calendar, Mic, Search, Settings, LogOut, BarChart3, Shield, Trophy } from 'lucide-react';
+import { Menu, Home, Calendar, Mic, Search, Settings, LogOut, BarChart3, Shield, Trophy, KeyRound } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { useUserRoles } from '@/hooks/useUserRoles';
 
@@ -35,6 +35,7 @@ export const NavigationMenu = () => {
     { label: 'Search Calls', icon: Search, onClick: () => handleNavigation('/search') },
     { label: 'Pt Pref.', icon: Settings, onClick: () => handleNavigation('/contact-preferences') },
     { label: 'Leaderboard', icon: Trophy, onClick: () => handleNavigation('/leaderboard') },
+    { label: 'Security', icon: KeyRound, onClick: () => handleNavigation('/security-settings') },
   ];
 
   if (isLeader() || isCoach()) {

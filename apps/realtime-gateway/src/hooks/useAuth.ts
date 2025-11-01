@@ -10,10 +10,47 @@ export const useAuth = () => {
   useEffect(() => {
     // Set up auth state listener FIRST
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, session) => {
+      async (event, session) => {
         setSession(session);
         setUser(session?.user ?? null);
         setLoading(false);
+
+        // Log login audit for successful sign-in
+        if (event === 'SIGNED_IN' && session?.user) {
+          try {
+            const { data: { session: currentSession } } = await supabase.auth.getSession();
+            if (currentSession?.access_token) {
+              // Get device information
+              const userAgent = navigator.userAgent;
+              const deviceName = /Mobile|Android/i.test(userAgent) ? 'Mobile Device' : 'Desktop';
+              
+              // Get IP address (client-side approximation)
+              const ipAddress = await fetch('https://api.ipify.org?format=json')
+                .then(res => res.json())
+                .then(data => data.ip)
+                .catch(() => 'unknown');
+
+              // Log successful login
+              await fetch('/api/auth/login-audit', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${currentSession.access_token}`
+                },
+                body: JSON.stringify({
+                  user_id: session.user.id,
+                  login_method: 'password',
+                  status: 'success',
+                  ip_address: ipAddress,
+                  user_agent: userAgent,
+                  device_name: deviceName
+                })
+              }).catch(err => console.error('Failed to log login audit:', err));
+            }
+          } catch (error) {
+            console.error('Error logging login audit:', error);
+          }
+        }
       }
     );
 
