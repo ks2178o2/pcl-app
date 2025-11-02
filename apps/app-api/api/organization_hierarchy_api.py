@@ -9,8 +9,8 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel, Field
 from datetime import datetime
 
-from ..services.supabase_client import get_supabase_client
-from ..middleware.permissions import (
+from services.supabase_client import get_supabase_client
+from middleware.permissions import (
     require_system_admin,
     require_admin_access,
     PermissionChecker,
@@ -30,6 +30,11 @@ class Organization(BaseModel):
     parent_organization_id: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    feature_count: Optional[int] = None
+    enabled_features: Optional[int] = None
+    
+    class Config:
+        extra = "allow"  # Allow dynamically added fields
 
 class OrganizationTreeNode(BaseModel):
     """Organization tree node model"""

@@ -5,12 +5,24 @@ from typing import List, Optional, Dict, Any
 import json
 from datetime import datetime
 from services.enhanced_context_manager import EnhancedContextManager
-from services.audit_logger import audit_logger
+from services.audit_logger import audit_logger  # type: ignore
 
 router = APIRouter(prefix="/api/enhanced-context", tags=["Enhanced Context Management"])
 
 # Initialize the enhanced context manager
 context_manager = EnhancedContextManager()
+
+# ==================== HELPER FUNCTIONS ====================
+
+async def get_current_user() -> Dict[str, Any]:
+    """Get current user from authentication (placeholder implementation)"""
+    # This would integrate with your authentication system
+    # For now, return a mock user
+    return {
+        "id": "user-123",
+        "role": "system_admin",
+        "organization_id": "org-123"
+    }
 
 # ==================== APP-WIDE CONTEXT ENDPOINTS ====================
 
