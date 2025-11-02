@@ -19,6 +19,9 @@ import Leaderboard from "./pages/Leaderboard";
 import { SystemAdmin } from "./pages/SystemAdmin";
 import SystemCheck from "./pages/SystemCheck";
 import { PatientDetails } from "./pages/PatientDetails";
+import TranscribeManager from "./pages/TranscribeManager";
+import Recordings from "./pages/Recordings";
+import SalesDashboard from "./pages/SalesDashboard";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -32,8 +35,9 @@ const App = () => (
         <RecordingStateProvider>
           <IdleTimeoutProvider>
             <Routes>
-            <Route path="/" element={<Index />} />
-            <Route path="/appointments" element={<Appointments />} />
+              <Route path="/" element={<Index />} />
+              <Route path="/dashboard" element={<SalesDashboard />} />
+              <Route path="/appointments" element={<Appointments />} />
             <Route path="/voice-profile" element={<VoiceProfile />} />
             <Route path="/search" element={<CallsSearch />} />
             <Route path="/contact-preferences" element={<ContactPreferences />} />
@@ -46,6 +50,8 @@ const App = () => (
             <Route path="/auth" element={<Auth />} />
             <Route path="/accept-invitation" element={<AcceptInvitation />} />
             <Route path="/security-settings" element={<SecuritySettings />} />
+            <Route path="/transcribe" element={<TranscribeManager />} />
+            <Route path="/recordings" element={<Recordings />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
             </Routes>

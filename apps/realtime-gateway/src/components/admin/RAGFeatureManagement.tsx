@@ -6,7 +6,7 @@
 import React, { useState, useMemo } from 'react';
 import { RAGFeatureManagementProps, RAGFeatureCategory, RAGFeatureWithToggle } from '@/types/rag-features';
 import { useRAGFeatures, useRAGFeaturesByCategory } from '@/hooks/useRAGFeatures';
-import { RAGFeatureCategorySection } from './RAGFeatureCategorySection';
+import { RAGFeatureCategorySection } from '../rag/RAGFeatureCategorySection';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
