@@ -24,7 +24,7 @@ export const SalesDashboardSidebar = () => {
   const navItems = [
     { icon: LayoutDashboard, label: "Dashboard", path: "/dashboard" },
     { icon: Calendar, label: "Today's Schedule", path: "/schedule" },
-    { icon: Users, label: "Leads", path: "/leads" },
+    { icon: Users, label: "Leads", path: "/dashboard" }, // Temporary link to dashboard
     { icon: Clock, label: "Activity Log", path: "/activity" },
   ];
 
