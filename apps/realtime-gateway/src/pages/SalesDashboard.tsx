@@ -23,30 +23,10 @@ import {
 import { useAuth } from '@/hooks/useAuth';
 import { useProfile } from '@/hooks/useProfile';
 import { useCallRecords } from '@/hooks/useCallRecords';
+import { useAppointments } from '@/hooks/useAppointments';
+import { useDashboardMetrics } from '@/hooks/useDashboardMetrics';
 import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
-
-interface DashboardMetrics {
-  newLeadsThisWeek: number;
-  newLeadsChange: number;
-  consultationsBooked: number;
-  consultationsChange: number;
-  dealsClosedThisMonth: number;
-  dealsClosedChange: number;
-  revenueGenerated: number;
-  revenueChange: number;
-}
-
-interface ScheduledAppointment {
-  time: string;
-  name: string;
-  type: string;
-}
-
-interface ManualFollowup {
-  action: string;
-  lastContact: string;
-}
 
 interface RecentActivity {
   message: string;
@@ -59,66 +39,73 @@ const SalesDashboard = () => {
   const { user, signOut } = useAuth();
   const { profile } = useProfile();
   const { calls, loadCalls } = useCallRecords();
+  const { appointments: dbAppointments, loading: appointmentsLoading } = useAppointments();
+  const { metrics, loading: metricsLoading } = useDashboardMetrics();
   
-  const [metrics, setMetrics] = useState<DashboardMetrics>({
-    newLeadsThisWeek: 42,
-    newLeadsChange: 15,
-    consultationsBooked: 18,
-    consultationsChange: 5,
-    dealsClosedThisMonth: 7,
-    dealsClosedChange: -10,
-    revenueGenerated: 84000,
-    revenueChange: 20
-  });
-  
-  const [appointments, setAppointments] = useState<ScheduledAppointment[]>([
-    { time: '10:00 AM', name: 'Sarah Connor', type: 'Initial Consult' },
-    { time: '11:30 AM', name: 'Barbara K.', type: 'Follow-up Call' },
-    { time: '2:00 PM', name: 'John Kyle', type: 'Initial Consult' }
-  ]);
-  
-  const [followups, setFollowups] = useState<ManualFollowup[]>([
-    { action: 'Follow up with Mike P.', lastContact: 'Last contact: 3 hours ago' }
-  ]);
-  
-  const [activities, setActivities] = useState<RecentActivity[]>([
-    { 
-      message: 'New lead assigned from web form: Sarah Connor.', 
-      timestamp: '2 mins ago',
-      icon: <UserPlus className="h-4 w-4" />
-    },
-    { 
-      message: 'Jane Doe opened your follow-up email.', 
-      timestamp: '15 mins ago',
-      icon: <Mail className="h-4 w-4" />
-    },
-    { 
-      message: 'Task completed: Send quote to Dental Associates Clinic.', 
-      timestamp: '1 hour ago',
-      icon: <CheckCircle2 className="h-4 w-4" />
-    },
-    { 
-      message: 'Call logged with Mike P. Duration: 12m 34s.', 
-      timestamp: '3 hours ago',
-      icon: <Phone className="h-4 w-4" />
-    }
-  ]);
+  const [activities, setActivities] = useState<RecentActivity[]>([]);
 
   useEffect(() => {
     if (user && profile) {
       loadCalls(10);
-      // TODO: Fetch real metrics from backend
-      fetchDashboardMetrics();
+      generateActivityFeed();
     }
-  }, [user, profile]);
+  }, [user, profile, calls, dbAppointments]);
 
-  const fetchDashboardMetrics = async () => {
-    // TODO: Implement real API calls to fetch:
-    // - New leads this week
-    // - Consultations booked
-    // - Deals closed this month
-    // - Revenue generated
-    // For now, using mock data
+  // Generate activity feed from calls and appointments
+  const generateActivityFeed = () => {
+    const activitiesList: RecentActivity[] = [];
+    
+    // Add recent calls as activities
+    if (calls && calls.length > 0) {
+      const recentCalls = calls.slice(0, 3);
+      recentCalls.forEach((call) => {
+        const timeDiff = Date.now() - call.timestamp.getTime();
+        const minutesAgo = Math.floor(timeDiff / 60000);
+        const hoursAgo = Math.floor(minutesAgo / 60);
+        
+        let timestamp: string;
+        if (minutesAgo < 60) {
+          timestamp = `${minutesAgo} ${minutesAgo === 1 ? 'min' : 'mins'} ago`;
+        } else if (hoursAgo < 24) {
+          timestamp = `${hoursAgo} ${hoursAgo === 1 ? 'hour' : 'hours'} ago`;
+        } else {
+          timestamp = `${Math.floor(hoursAgo / 24)} days ago`;
+        }
+
+        activitiesList.push({
+          message: `Call logged with ${call.patientName}. Duration: ${Math.floor(call.duration / 60)}m ${call.duration % 60}s.`,
+          timestamp,
+          icon: <Phone className="h-4 w-4" />
+        });
+      });
+    }
+
+    // Add recent appointments as activities
+    if (dbAppointments && dbAppointments.length > 0) {
+      const recentApps = dbAppointments.slice(0, 2);
+      recentApps.forEach((apt) => {
+        const timeDiff = Date.now() - new Date(apt.created_at).getTime();
+        const minutesAgo = Math.floor(timeDiff / 60000);
+        const hoursAgo = Math.floor(minutesAgo / 60);
+        
+        let timestamp: string;
+        if (minutesAgo < 60) {
+          timestamp = `${minutesAgo} ${minutesAgo === 1 ? 'min' : 'mins'} ago`;
+        } else if (hoursAgo < 24) {
+          timestamp = `${hoursAgo} ${hoursAgo === 1 ? 'hour' : 'hours'} ago`;
+        } else {
+          timestamp = `${Math.floor(hoursAgo / 24)} days ago`;
+        }
+
+        activitiesList.push({
+          message: `New appointment scheduled: ${apt.customer_name}`,
+          timestamp,
+          icon: <CalendarIcon className="h-4 w-4" />
+        });
+      });
+    }
+
+    setActivities(activitiesList);
   };
 
   const getGreeting = () => {
@@ -232,45 +219,37 @@ const SalesDashboard = () => {
                   <div>
                     <h4 className="text-sm font-medium text-gray-900 mb-4">Scheduled Appointments</h4>
                     <div className="space-y-4">
-                      {appointments.map((apt, idx) => (
-                        <div key={idx} className="flex items-start justify-between group">
-                          <div className="flex items-start space-x-3 flex-1">
-                            <CalendarIcon className="h-5 w-5 text-gray-400 mt-0.5" />
-                            <div className="flex-1">
-                              <p className="font-medium text-gray-900">{apt.time} - {apt.name}</p>
-                              <p className="text-sm text-gray-600">{apt.type}</p>
+                      {dbAppointments && dbAppointments.length > 0 ? (
+                        dbAppointments.slice(0, 3).map((apt, idx) => {
+                          const aptDate = new Date(apt.appointment_date);
+                          const timeStr = aptDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+                          const today = new Date();
+                          const isToday = aptDate.toDateString() === today.toDateString();
+                          
+                          return (
+                            <div key={apt.id} className="flex items-start justify-between group">
+                              <div className="flex items-start space-x-3 flex-1">
+                                <CalendarIcon className="h-5 w-5 text-gray-400 mt-0.5" />
+                                <div className="flex-1">
+                                  <p className="font-medium text-gray-900">{timeStr} - {apt.customer_name}</p>
+                                  <p className="text-sm text-gray-600">
+                                    {isToday ? 'Today' : aptDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                                  </p>
+                                </div>
+                              </div>
+                              <Button variant="ghost" size="sm" className="opacity-0 group-hover:opacity-100">
+                                <MoreVertical className="h-4 w-4" />
+                              </Button>
                             </div>
-                          </div>
-                          <Button variant="ghost" size="sm" className="opacity-0 group-hover:opacity-100">
-                            <MoreVertical className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      ))}
+                          );
+                        })
+                      ) : (
+                        <p className="text-sm text-gray-500 text-center py-4">No appointments scheduled for today</p>
+                      )}
                     </div>
                   </div>
 
-                  <Separator />
-
-                  {/* Manual Follow-ups */}
-                  <div>
-                    <h4 className="text-sm font-medium text-gray-900 mb-4">Manual Follow-ups</h4>
-                    <div className="space-y-4">
-                      {followups.map((followup, idx) => (
-                        <div key={idx} className="flex items-start justify-between group">
-                          <div className="flex items-start space-x-3 flex-1">
-                            <Phone className="h-5 w-5 text-gray-400 mt-0.5" />
-                            <div className="flex-1">
-                              <p className="font-medium text-gray-900">{followup.action}</p>
-                              <p className="text-sm text-gray-600">{followup.lastContact}</p>
-                            </div>
-                          </div>
-                          <Button variant="ghost" size="sm" className="opacity-0 group-hover:opacity-100">
-                            <MoreVertical className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
+                  {/* Recent Activity Section moved below */}
                 </CardContent>
               </Card>
 
