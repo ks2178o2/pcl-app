@@ -22,6 +22,7 @@ import { PatientDetails } from "./pages/PatientDetails";
 import TranscribeManager from "./pages/TranscribeManager";
 import Recordings from "./pages/Recordings";
 import SalesDashboard from "./pages/SalesDashboard";
+import ScheduleDetail from "./pages/ScheduleDetail";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -38,6 +39,7 @@ const App = () => (
               <Route path="/" element={<Index />} />
               <Route path="/dashboard" element={<SalesDashboard />} />
               <Route path="/appointments" element={<Appointments />} />
+              <Route path="/schedule" element={<ScheduleDetail />} />
             <Route path="/voice-profile" element={<VoiceProfile />} />
             <Route path="/search" element={<CallsSearch />} />
             <Route path="/contact-preferences" element={<ContactPreferences />} />

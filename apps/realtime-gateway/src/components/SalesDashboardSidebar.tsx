@@ -1,5 +1,5 @@
 import React from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { 
@@ -17,12 +17,13 @@ import { cn } from '@/lib/utils';
 
 export const SalesDashboardSidebar = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user } = useAuth();
   const { profile } = useProfile();
 
   const navItems = [
-    { icon: LayoutDashboard, label: "Dashboard", path: "/dashboard", active: true },
-    { icon: Calendar, label: "Today's Schedule", path: "/appointments" },
+    { icon: LayoutDashboard, label: "Dashboard", path: "/dashboard" },
+    { icon: Calendar, label: "Today's Schedule", path: "/schedule" },
     { icon: Users, label: "Leads", path: "/leads" },
     { icon: Clock, label: "Activity Log", path: "/activity" },
   ];
@@ -49,7 +50,7 @@ export const SalesDashboardSidebar = () => {
             key={item.path}
             icon={<item.icon className="h-5 w-5" />} 
             label={item.label} 
-            active={item.active}
+            active={location.pathname === item.path}
             onClick={() => navigate(item.path)}
           />
         ))}
@@ -95,7 +96,7 @@ interface SidebarNavItemProps {
   onClick: () => void;
 }
 
-const SidebarNavItem: React.FC<SidebarNavItemProps> = ({ icon, label, active, onClick }) => {
+const SidebarNavItem: React.FC<SidebarNavItemProps> = ({ icon, label, active = false, onClick }) => {
   return (
     <button
       onClick={onClick}
