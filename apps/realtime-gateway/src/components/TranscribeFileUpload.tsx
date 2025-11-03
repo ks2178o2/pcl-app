@@ -47,10 +47,11 @@ export const TranscribeFileUpload: React.FC<TranscribeFileUploadProps> = ({
     status: 'idle',
     message: ''
   });
-  const [provider, setProvider] = useState<'deepgram' | 'assemblyai'>('deepgram');
+  const [provider, setProvider] = useState<'deepgram' | 'assemblyai'>('assemblyai');
   const [language, setLanguage] = useState<string>('');
   const [isDragging, setIsDragging] = useState(false);
   const [dragCounter, setDragCounter] = useState(0);
+  const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8001';
 
   // Handle file selection
   const handleFileSelect = useCallback((file: File) => {
@@ -160,6 +161,13 @@ export const TranscribeFileUpload: React.FC<TranscribeFileUploadProps> = ({
       });
 
       xhr.addEventListener('loadend', () => {
+        console.log('[Transcribe Upload] loadend status:', xhr.status, xhr.statusText);
+        let parsed: any = undefined;
+        try {
+          parsed = xhr.responseText ? JSON.parse(xhr.responseText) : undefined;
+        } catch (e) {
+          // ignore parse error; we'll fall back to raw text
+        }
         if (xhr.status === 201) {
           const response = JSON.parse(xhr.responseText);
           setUploadState({
@@ -183,16 +191,22 @@ export const TranscribeFileUpload: React.FC<TranscribeFileUploadProps> = ({
             onUploadComplete?.();
           }, 2000);
         } else {
-          const errorData = JSON.parse(xhr.responseText || '{}');
+          const errorData = parsed || {};
+          const detail = (errorData && (errorData.detail || errorData.message)) || xhr.statusText || 'Upload failed';
+          console.error('[Transcribe Upload] Error response:', {
+            status: xhr.status,
+            statusText: xhr.statusText,
+            responseText: xhr.responseText
+          });
           setUploadState({
             progress: 0,
             status: 'error',
-            message: errorData.detail || 'Upload failed'
+            message: detail
           });
           
           toast({
             title: "Upload failed",
-            description: errorData.detail || 'An error occurred during upload',
+            description: detail,
             variant: "destructive",
           });
         }
@@ -212,7 +226,7 @@ export const TranscribeFileUpload: React.FC<TranscribeFileUploadProps> = ({
         });
       });
 
-      xhr.open('POST', '/api/transcribe/upload');
+      xhr.open('POST', `${API_BASE_URL}/api/transcribe/upload`);
       xhr.setRequestHeader('Authorization', `Bearer ${session.access_token}`);
       xhr.send(formData);
 

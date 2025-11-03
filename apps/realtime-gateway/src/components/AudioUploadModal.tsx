@@ -15,6 +15,7 @@ interface AppointmentWithStatus {
   appointment_date: string;
   status: 'upcoming' | 'current' | 'recent' | 'past';
   timeDescription: string;
+  patient_id?: string | null;
 }
 
 interface AudioUploadModalProps {
@@ -134,7 +135,15 @@ export const AudioUploadModal: React.FC<AudioUploadModalProps> = ({
           const typedBlob = new Blob([finalBlob], { type: finalContentType });
           
           // Add the call using the existing addCall function
-          const callId = await addCall(typedBlob, duration, appointment.customer_name, profile.salesperson_name, appointment.id !== 'temp' ? appointment.id : undefined, centerId);
+          const patientId = appointment.patient_id || undefined;
+          const callResult = await addCall(
+            typedBlob,
+            duration,
+            appointment.customer_name,
+            profile.salesperson_name,
+            patientId,
+            centerId
+          );
           
           const successMessage = compressionInfo 
             ? `Recording uploaded and compressed from ${formatFileSize(compressionInfo.originalSize)} to ${formatFileSize(compressionInfo.convertedSize)} (${compressionInfo.ratio}% smaller)`
@@ -148,9 +157,10 @@ export const AudioUploadModal: React.FC<AudioUploadModalProps> = ({
           URL.revokeObjectURL(objectUrl);
           onUploadComplete();
           
-          // Navigate to analysis page
-          if (callId?.id) {
-            navigate(`/analysis/${callId.id}`);
+          // Navigate to analysis page only if we have a valid UUID id
+          const newId = (callResult as any)?.id;
+          if (typeof newId === 'string' && newId.includes('-') && newId.length >= 32) {
+            navigate(`/analysis/${newId}`);
           }
         } catch (error) {
           console.error('Error uploading audio:', error);

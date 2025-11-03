@@ -16,6 +16,7 @@ import {
   Calendar as CalendarIcon,
   Mic,
   StopCircle,
+  Upload,
   Mail,
   Phone,
   Cake,
@@ -31,6 +32,8 @@ import { useCallRecords } from '@/hooks/useCallRecords';
 import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { AudioUploadModal } from '@/components/AudioUploadModal';
 
 interface PatientInfo {
   dob?: string;
@@ -62,6 +65,7 @@ const ScheduleDetail = () => {
   const [notes, setNotes] = useState('');
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [patientInfoMap, setPatientInfoMap] = useState<Map<string, PatientInfo>>(new Map());
+  const [uploadModalOpen, setUploadModalOpen] = useState(false);
 
   const loadPatientDetailsForAllAppointments = async () => {
     if (!appointments || appointments.length === 0) return;
@@ -635,7 +639,7 @@ const ScheduleDetail = () => {
                   </div>
                 </div>
 
-                {/* Start Consult Button */}
+                {/* Start Consult + Upload Recording Buttons */}
                 <div className="flex gap-2">
                   <button
                     onClick={isRecording ? handleFinishRecording : handleStartConsult}
@@ -658,7 +662,47 @@ const ScheduleDetail = () => {
                       </>
                     )}
                   </button>
+                  <button
+                    onClick={() => setUploadModalOpen(true)}
+                    className={cn(
+                      "flex-1 flex items-center justify-center rounded-lg h-10 px-4 text-sm font-bold transition-colors",
+                      "bg-blue-600 hover:bg-blue-700 text-white"
+                    )}
+                  >
+                    <Upload className="h-4 w-4 mr-2" />
+                    Upload Recording
+                  </button>
                 </div>
+
+                {/* Upload Recording Modal */}
+                <Dialog open={uploadModalOpen} onOpenChange={setUploadModalOpen}>
+                  <DialogContent className="max-w-xl">
+                    <DialogHeader>
+                      <DialogTitle>Upload Pre-recorded Audio</DialogTitle>
+                      <DialogDescription>
+                        Choose an audio file to upload. It will follow the same processing path as live recordings.
+                      </DialogDescription>
+                    </DialogHeader>
+                    {selectedAppointment && (
+                      <AudioUploadModal
+                        open={true}
+                        onOpenChange={setUploadModalOpen}
+                        appointment={{
+                          id: selectedAppointment.id,
+                          customer_name: selectedAppointment.customer_name,
+                          appointment_date: selectedAppointment.appointment_date,
+                          status: 'recent',
+                          timeDescription: 'Uploaded',
+                          patient_id: (selectedAppointment as any)?.patient_id || null
+                        }}
+                        onUploadComplete={() => {
+                          setUploadModalOpen(false);
+                          loadCalls(50);
+                        }}
+                      />
+                    )}
+                  </DialogContent>
+                </Dialog>
 
                 {/* Patient History & Notes */}
                 <div className="flex flex-col gap-4 mt-2 flex-1">

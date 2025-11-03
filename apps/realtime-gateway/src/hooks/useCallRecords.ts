@@ -151,7 +151,6 @@ export const useCallRecords = () => {
           .from('call_records')
           .update({
             chunks_uploaded: 1,
-            status: 'ready_for_transcription',
             audio_file_url: uploadData.path 
           })
           .eq('id', data.id);
@@ -181,54 +180,61 @@ export const useCallRecords = () => {
           
           let transcriptionResult: any, transcriptionError: any;
           
-          if (storagePath) {
-            // Prefer server-side fetch from storage to avoid large payloads
-            const payload = await buildTranscriptionPayload({
-              storagePath,
-              callId: data.id,
-              salespersonName,
-              customerName: patientName,
-              organizationId: (user as any)?.organization_id,
+          // Replace edge function call with backend proxy for portability
+          const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8001';
+          const form = new FormData();
+          form.append('file', audioBlob, 'recording.webm');
+          form.append('provider', 'deepgram');
+          form.append('salesperson_name', salespersonName);
+          form.append('customer_name', patientName);
+
+          try {
+            const { data: sessionData } = await supabase.auth.getSession();
+            const token = sessionData?.session?.access_token;
+            const resp = await fetch(`${API_BASE_URL}/api/transcribe/upload`, {
+              method: 'POST',
+              headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+              body: form,
             });
-            
-            ({ data: transcriptionResult, error: transcriptionError } = await supabase.functions.invoke('transcribe-audio-v2', {
-              body: payload,
-            }));
-          } else {
-            // Fallback: convert blob to base64 and send directly
-            const convertBlobToBase64 = async (blob: Blob) => {
-              const arrayBuffer = await blob.arrayBuffer();
-              const uint8Array = new Uint8Array(arrayBuffer);
-              let base64String = '';
-              const chunkSize = 8192;
-              for (let i = 0; i < uint8Array.length; i += chunkSize) {
-                const chunk = uint8Array.slice(i, i + chunkSize);
-                base64String += btoa(String.fromCharCode(...chunk));
+            if (!resp.ok) {
+              throw new Error(`Backend upload failed: ${resp.status}`);
+            }
+            const respJson = await resp.json();
+            const uploadId = respJson?.upload_id || respJson?.transcript_job_id;
+            console.log('✅ Backend transcription queued', uploadId);
+
+            // Poll backend status until completed, then persist transcript into call_records and run analysis
+            if (uploadId && token) {
+              const maxMs = 120000; // 2 minutes
+              const intervalMs = 2000;
+              const start = Date.now();
+              let transcriptText: string | null = null;
+              for (;;) {
+                const statusResp = await fetch(`${API_BASE_URL}/api/transcribe/status/${uploadId}`, {
+                  headers: { Authorization: `Bearer ${token}` },
+                });
+                if (statusResp.ok) {
+                  const statusJson = await statusResp.json();
+                  if (statusJson?.status === 'completed' && statusJson?.transcript) {
+                    transcriptText = statusJson.transcript as string;
+                    break;
+                  }
+                  if (statusJson?.status === 'failed') {
+                    throw new Error(statusJson?.error || 'Transcription failed');
+                  }
+                }
+                if (Date.now() - start > maxMs) break;
+                await new Promise(r => setTimeout(r, intervalMs));
               }
-              return base64String;
-            };
-            const audioBase64 = await convertBlobToBase64(audioBlob);
-            
-            const payload = await buildTranscriptionPayload({
-              audioBase64,
-              callId: data.id,
-              salespersonName,
-              customerName: patientName,
-              organizationId: (user as any)?.organization_id,
-            });
-            
-            ({ data: transcriptionResult, error: transcriptionError } = await supabase.functions.invoke('transcribe-audio-v2', {
-              body: payload,
-            }));
+
+              if (transcriptText) {
+                await updateCallInDatabase(data.id, { transcript: transcriptText, status: 'completed' });
+              }
+            }
+          } catch (e) {
+            console.error('❌ Failed to queue backend transcription:', e);
           }
-          
-          if (transcriptionError || !transcriptionResult?.success) {
-            throw new Error(transcriptionResult?.error || 'Transcription failed');
-          }
-          
-          const transcript = transcriptionResult.transcript;
-          console.log('✅ Transcription completed, updating database for call:', data.id);
-          await updateCallInDatabase(data.id, { transcript, status: 'completed' });
+          // Keep existing DB record; transcript will be updated by subsequent flows
           
           // After successful transcription, trigger analysis in background
           console.log('🔍 Starting background analysis for call:', data.id);
@@ -237,23 +243,16 @@ export const useCallRecords = () => {
               // Fetch the complete call record to get diarization_segments
               const { data: callData, error: fetchError } = await supabase
                 .from('call_records')
-                .select('transcript, diarization_segments, speaker_mapping')
+                .select('transcript')
                 .eq('id', data.id)
-                .single();
+                .maybeSingle();
               
               if (fetchError || !callData) {
                 throw new Error('Failed to fetch call data for analysis');
               }
 
               // Generate formatted transcript from diarization segments if available
-              let formattedTranscript = callData.transcript;
-              if (callData.diarization_segments && callData.speaker_mapping) {
-                const { generateMappedTranscript } = await import('@/utils/speakerUtils');
-                formattedTranscript = generateMappedTranscript(
-                  callData.diarization_segments as any[],
-                  callData.speaker_mapping as Record<string, string>
-                );
-              }
+              const formattedTranscript = callData.transcript;
 
               const { transcriptAnalysisService } = await import('@/services/transcriptAnalysisService');
               await transcriptAnalysisService.analyzeTranscript(
