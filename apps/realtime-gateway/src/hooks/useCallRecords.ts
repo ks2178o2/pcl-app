@@ -184,7 +184,8 @@ export const useCallRecords = () => {
           const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8001';
           const form = new FormData();
           form.append('file', audioBlob, 'recording.webm');
-          form.append('provider', 'deepgram');
+          // Temporarily prefer AssemblyAI since Deepgram key is unauthorized
+          form.append('provider', 'assemblyai');
           form.append('salesperson_name', salespersonName);
           form.append('customer_name', patientName);
 

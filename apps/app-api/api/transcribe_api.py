@@ -608,7 +608,7 @@ async def get_transcription_status(
 
 
 @router.get("/self-test", response_model=dict)
-async def transcribe_self_test(user=Depends(require_system_admin)):
+async def transcribe_self_test(user=Depends(get_current_user)):
     """Quick provider self-test using a public audio URL.
     Returns provider results or error details to validate keys/connectivity.
     """
