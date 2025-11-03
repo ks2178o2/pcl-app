@@ -1,0 +1,7 @@
+# Auto-assign both team members as reviewers
+* @ks121980 @scott378
+
+# This means:
+# - When you create a PR, she gets auto-assigned as reviewer
+# - When she creates a PR, you get auto-assigned as reviewer
+# - Both of you review each other's code
