@@ -23,7 +23,10 @@ import TranscribeManager from "./pages/TranscribeManager";
 import Recordings from "./pages/Recordings";
 import SalesDashboard from "./pages/SalesDashboard";
 import ScheduleDetail from "./pages/ScheduleDetail";
+import LeadsList from "./pages/LeadsList";
 import LeadDetails from "./pages/LeadDetails";
+import ActivityLog from "./pages/ActivityLog";
+import UserSettings from "./pages/UserSettings";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -41,7 +44,10 @@ const App = () => (
               <Route path="/dashboard" element={<SalesDashboard />} />
               <Route path="/appointments" element={<Appointments />} />
               <Route path="/schedule" element={<ScheduleDetail />} />
+              <Route path="/leads" element={<LeadsList />} />
               <Route path="/leads/:leadId" element={<LeadDetails />} />
+              <Route path="/activity" element={<ActivityLog />} />
+              <Route path="/settings" element={<UserSettings />} />
             <Route path="/voice-profile" element={<VoiceProfile />} />
             <Route path="/search" element={<CallsSearch />} />
             <Route path="/contact-preferences" element={<ContactPreferences />} />

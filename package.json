@@ -71,5 +71,8 @@
   "workspaces": [
     "apps/realtime-gateway",
     "packages/shared"
-  ]
+  ],
+  "dependencies": {
+    "date-fns": "^4.1.0"
+  }
 }

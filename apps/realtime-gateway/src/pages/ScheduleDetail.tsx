@@ -3,9 +3,12 @@ import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
+import { Calendar } from '@/components/ui/calendar';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { SalesDashboardSidebar } from '@/components/SalesDashboardSidebar';
 import { 
   Plus,
@@ -13,11 +16,14 @@ import {
   Calendar as CalendarIcon,
   Mic,
   StopCircle,
+  Upload,
   Mail,
   Phone,
   Cake,
   Mail as MailIcon,
-  Phone as PhoneIcon
+  Phone as PhoneIcon,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { useProfile } from '@/hooks/useProfile';
@@ -25,6 +31,9 @@ import { useAppointments, Appointment } from '@/hooks/useAppointments';
 import { useCallRecords } from '@/hooks/useCallRecords';
 import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
+import { format } from 'date-fns';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { AudioUploadModal } from '@/components/AudioUploadModal';
 
 interface PatientInfo {
   dob?: string;
@@ -47,72 +56,197 @@ const ScheduleDetail = () => {
   const navigate = useNavigate();
   const { user, signOut } = useAuth();
   const { profile } = useProfile();
-  const { appointments, loading: appointmentsLoading } = useAppointments();
-  const { calls } = useCallRecords();
+  const { appointments, loading: appointmentsLoading, loadAppointments } = useAppointments();
+  const { calls, loadCalls } = useCallRecords();
   
   const [selectedAppointment, setSelectedAppointment] = useState<SelectedAppointment | null>(null);
-  const [filter, setFilter] = useState<'all' | 'consults' | 'confirmed' | 'pending'>('all');
+  const [filter, setFilter] = useState<'all' | 'consults' | 'confirmed' | 'pending' | 'no-show'>('all');
   const [isRecording, setIsRecording] = useState(false);
   const [notes, setNotes] = useState('');
+  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+  const [patientInfoMap, setPatientInfoMap] = useState<Map<string, PatientInfo>>(new Map());
+  const [uploadModalOpen, setUploadModalOpen] = useState(false);
 
-  useEffect(() => {
-    if (!user || !profile) return;
-    
-    // Load appointments if not already loaded
-    if (appointments.length > 0 && !selectedAppointment) {
-      // Select first appointment by default
-      const firstAppointment = appointments[0];
-      loadPatientDetails(firstAppointment.id);
-      setSelectedAppointment(firstAppointment);
-    }
-  }, [user, profile, appointments]);
+  const loadPatientDetailsForAllAppointments = async () => {
+    if (!appointments || appointments.length === 0) return;
+
+    const newPatientInfoMap = new Map<string, PatientInfo>();
+
+    // Load patient details for all appointments in parallel
+    await Promise.all(
+      appointments.map(async (appointment) => {
+        const patientName = appointment.customer_name;
+        
+        try {
+          // Get calls for this customer
+          const { data: patientCalls } = await supabase
+            .from('call_records')
+            .select('*, call_analyses(*)')
+            .eq('customer_name', patientName)
+            .eq('user_id', user?.id || '')
+            .order('start_time', { ascending: false })
+            .limit(10);
+
+          // Extract patient info from call analyses (CNS updates based on latest interactions)
+          let motivation = '';
+          let likelyObjection = '';
+          let pastInteractions = '';
+          
+          // Get patient interactions from the patient_interactions table
+          const { data: patientInteractions } = await supabase
+            .from('patient_interactions')
+            .select('interaction_type, interaction_date, notes, metadata')
+            .eq('patient_name', patientName)
+            .eq('user_id', user?.id || '')
+            .eq('organization_id', profile?.organization_id || '')
+            .order('interaction_date', { ascending: false });
+          
+          // Get appointments for this patient (for reference)
+          const { data: patientAppointments } = await supabase
+            .from('appointments')
+            .select('id, created_at, type, status')
+            .eq('customer_name', patientName)
+            .eq('user_id', user?.id || '')
+            .order('created_at', { ascending: false });
+          
+          if (patientCalls && patientCalls.length > 0) {
+            // Get the most recent analysis (CNS uses latest interaction data)
+            const latestAnalysis = patientCalls[0]?.call_analyses?.[0]?.analysis_data;
+            
+            if (latestAnalysis?.customerPersonality?.motivationCategory) {
+              motivation = latestAnalysis.customerPersonality.motivationCategory;
+            }
+            
+            if (latestAnalysis?.objections && latestAnalysis.objections.length > 0) {
+              // Get the most recent objection type
+              likelyObjection = latestAnalysis.objections[0].type;
+            }
+          }
+          
+          // Build interaction history from patient_interactions table
+          // Count interactions by type (excluding current appointment)
+          const interactionCounts: Record<string, number> = {};
+          
+          if (patientInteractions && patientInteractions.length > 0) {
+            // Filter out the current appointment's interaction if it exists
+            const relevantInteractions = patientInteractions.filter(interaction => {
+              // Exclude current appointment interactions (they'll be counted separately)
+              const isCurrentAppointment = interaction.metadata?.type === appointment.type &&
+                                          new Date(interaction.interaction_date).toDateString() === 
+                                          new Date(appointment.appointment_date).toDateString();
+              return !isCurrentAppointment;
+            });
+            
+            relevantInteractions.forEach(interaction => {
+              const type = interaction.interaction_type;
+              interactionCounts[type] = (interactionCounts[type] || 0) + 1;
+            });
+          }
+          
+          // Build readable interaction history string
+          const interactionParts: string[] = [];
+          
+          // Map interaction types to readable phrases
+          const typePhrases: Record<string, string> = {
+            'call': 'call center conversation',
+            'email': 'email exchange',
+            'sms': 'SMS exchange',
+            'webform': 'webform submission',
+            'walk_in': 'walk-in visit',
+            'online_inquiry': 'online inquiry',
+            'referral': 'referral intake',
+            'social_media': 'social media contact',
+            'appointment': 'appointment',
+            'consultation': 'consultation',
+            'follow_up': 'follow-up visit'
+          };
+          
+          // Add interactions in order (most common first)
+          const sortedTypes = Object.entries(interactionCounts)
+            .sort((a, b) => b[1] - a[1]);
+          
+          sortedTypes.forEach(([type, count]) => {
+            const phrase = typePhrases[type] || type;
+            if (count === 1) {
+              interactionParts.push(`1 ${phrase}`);
+            } else {
+              // Handle pluralization correctly
+              const pluralPhrase = type === 'follow_up' ? 'follow-up visits' :
+                                  type === 'walk_in' ? 'walk-in visits' :
+                                  type === 'online_inquiry' ? 'online inquiries' :
+                                  type === 'social_media' ? 'social media contacts' :
+                                  type === 'webform' ? 'webform submissions' :
+                                  `${phrase}s`;
+              interactionParts.push(`${count} ${pluralPhrase}`);
+            }
+          });
+          
+          // If no interactions found, show default
+          if (interactionParts.length === 0) {
+            pastInteractions = 'No prior interactions';
+          } else {
+            // Format as comma-separated list with proper grammar
+            if (interactionParts.length === 1) {
+              pastInteractions = interactionParts[0];
+            } else if (interactionParts.length === 2) {
+              pastInteractions = `${interactionParts[0]} and ${interactionParts[1]}`;
+            } else {
+              const last = interactionParts.pop();
+              pastInteractions = `${interactionParts.join(', ')}, and ${last}`;
+            }
+          }
+          
+          // Fallback if no call data for motivation/objection
+          if (!motivation) {
+            motivation = 'Initial interest - needs assessment';
+          }
+          if (!likelyObjection) {
+            likelyObjection = 'Unknown - to be determined';
+          }
+
+          const patientInfo: PatientInfo = {
+            motivation,
+            likelyObjection,
+            pastInteractions,
+          };
+
+          newPatientInfoMap.set(appointment.id, patientInfo);
+        } catch (error) {
+          console.error(`Error loading patient details for ${patientName}:`, error);
+          // Set default info on error
+          newPatientInfoMap.set(appointment.id, {
+            motivation: 'Loading...',
+            likelyObjection: 'Loading...',
+            pastInteractions: 'Loading...',
+          });
+        }
+      })
+    );
+
+    setPatientInfoMap(newPatientInfoMap);
+  };
 
   const loadPatientDetails = async (appointmentId: string) => {
     try {
       const appointment = appointments.find(apt => apt.id === appointmentId);
       if (!appointment) return;
 
-      // Try to get patient info from call analyses for this customer
+      // Get patient info from the map
+      const patientInfo = patientInfoMap.get(appointmentId);
+
+      // Get calls for the right panel
       const patientName = appointment.customer_name;
-      
-      // Get calls for this customer
       const { data: patientCalls } = await supabase
         .from('call_records')
         .select('*, call_analyses(*)')
         .eq('customer_name', patientName)
-        .order('created_at', { ascending: false })
-        .limit(5);
-
-      // Extract patient info from call analyses
-      let motivation = '';
-      let likelyObjection = '';
-      let pastInteractions = '';
-      
-      if (patientCalls && patientCalls.length > 0) {
-        const latestAnalysis = patientCalls[0]?.call_analyses?.[0]?.analysis_data;
-        
-        if (latestAnalysis?.customerPersonality?.motivationCategory) {
-          motivation = latestAnalysis.customerPersonality.motivationCategory;
-        }
-        
-        if (latestAnalysis?.objections && latestAnalysis.objections.length > 0) {
-          likelyObjection = latestAnalysis.objections[0].type;
-        }
-        
-        const callCount = patientCalls.length;
-        pastInteractions = `${callCount} call${callCount !== 1 ? 's' : ''}`;
-      }
-
-      // Mock patient info for now (can be enhanced with real patient data)
-      const patientInfo: PatientInfo = {
-        motivation: motivation || 'Wants to feel confident and look great for daughter\'s wedding in 5 months',
-        likelyObjection: likelyObjection || 'Financing / Cost',
-        pastInteractions: pastInteractions || '2 calls, 1 email',
-      };
+        .eq('user_id', user?.id || '')
+        .order('start_time', { ascending: false })
+        .limit(10);
 
       setSelectedAppointment({
         ...appointment,
-        patientInfo,
+        patientInfo: patientInfo || undefined,
         calls: patientCalls || [],
       });
     } catch (error) {
@@ -136,13 +270,68 @@ const ScheduleDetail = () => {
     // TODO: Stop recording and save
   };
 
-  const filteredAppointments = appointments;
+  // Load appointments when date changes
+  useEffect(() => {
+    if (!user || !profile) return;
+    
+    // Load recent calls
+    loadCalls(50);
+    
+    // Load appointments for selected date
+    loadAppointments(selectedDate);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, profile, selectedDate]);
+
+  // Load patient details for all appointments when appointments change
+  useEffect(() => {
+    if (appointments.length > 0 && user) {
+      loadPatientDetailsForAllAppointments();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appointments, user]);
+
+  // Select first appointment when appointments are loaded
+  useEffect(() => {
+    if (appointments.length > 0 && !selectedAppointment) {
+      const firstAppointment = appointments[0];
+      loadPatientDetails(firstAppointment.id);
+      setSelectedAppointment(firstAppointment);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appointments, patientInfoMap]);
+
+  // Filter appointments based on selected filter
+  const filteredAppointments = appointments.filter(apt => {
+    if (filter === 'all') return true;
+    if (filter === 'confirmed') return apt.status?.toLowerCase() === 'confirmed';
+    if (filter === 'pending') return apt.status?.toLowerCase() === 'pending';
+    if (filter === 'no-show') return apt.status?.toLowerCase() === 'no show';
+    return true;
+  });
 
   const filterCounts = {
-    all: filteredAppointments.length,
-    consults: filteredAppointments.length,
-    confirmed: filteredAppointments.filter(apt => apt.appointment_date).length,
-    pending: 0, // Mock for now
+    all: appointments.length,
+    consults: appointments.length,
+    confirmed: appointments.filter(apt => apt.status?.toLowerCase() === 'confirmed').length,
+    pending: appointments.filter(apt => apt.status?.toLowerCase() === 'pending').length,
+    'no-show': appointments.filter(apt => apt.status?.toLowerCase() === 'no show').length,
+  };
+
+  const handleDateChange = (newDate: Date) => {
+    setSelectedDate(newDate);
+    setSelectedAppointment(null); // Clear selection when changing dates
+  };
+
+  const handlePreviousDay = () => {
+    const newDate = new Date(selectedDate);
+    newDate.setDate(newDate.getDate() - 1);
+    handleDateChange(newDate);
+  };
+
+  const handleNextDay = () => {
+    const newDate = new Date(selectedDate);
+    newDate.setDate(newDate.getDate() + 1);
+    handleDateChange(newDate);
   };
 
   if (!user || !profile) {
@@ -167,14 +356,47 @@ const ScheduleDetail = () => {
           {/* Left Panel - Appointment List */}
           <div className="flex-1 flex flex-col p-6 overflow-y-auto">
             <div className="flex justify-between items-center mb-6">
-              <h1 className="text-3xl font-bold text-gray-900">
-                Today's Patient Meeting Schedule
-              </h1>
-              <Button className="bg-blue-600 hover:bg-blue-700">
+              <div className="flex items-center gap-4">
+                {/* Calendar Navigation */}
+                <div className="flex items-center gap-2">
+                  <Button variant="outline" size="sm" onClick={handlePreviousDay}>
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button variant="outline" size="sm" className="min-w-[140px]">
+                        <CalendarIcon className="h-4 w-4 mr-2" />
+                        {format(selectedDate, 'MMM d, yyyy')}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0" align="start">
+                      <Calendar
+                        mode="single"
+                        selected={selectedDate}
+                        onSelect={(date) => date && handleDateChange(date)}
+                        initialFocus
+                      />
+                    </PopoverContent>
+                  </Popover>
+                  
+                  <Button variant="outline" size="sm" onClick={handleNextDay}>
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+              <Button>
                 <Plus className="h-4 w-4 mr-2" />
                 Add Meeting
               </Button>
             </div>
+            
+            <h2 className="text-2xl font-semibold text-gray-800 mb-4">
+              {format(selectedDate, 'EEEE') === format(new Date(), 'EEEE') && 
+               format(selectedDate, 'yyyy-MM-dd') === format(new Date(), 'yyyy-MM-dd')
+                ? "Today's Patient Meeting Schedule"
+                : `${format(selectedDate, 'EEEE')}'s Patient Meeting Schedule`}
+            </h2>
 
             {/* Filter Tabs */}
             <div className="flex gap-3 mb-4 overflow-x-auto pb-2 border-b border-gray-200">
@@ -183,7 +405,7 @@ const ScheduleDetail = () => {
                 className={cn(
                   "shrink-0 pb-2 px-3 text-sm font-medium border-b-2 transition-colors",
                   filter === 'all'
-                    ? "text-blue-600 border-blue-600 font-semibold"
+                    ? "text-primary border-primary font-semibold"
                     : "text-gray-500 border-transparent hover:border-gray-300"
                 )}
               >
@@ -194,7 +416,7 @@ const ScheduleDetail = () => {
                 className={cn(
                   "shrink-0 pb-2 px-3 text-sm font-medium border-b-2 transition-colors",
                   filter === 'consults'
-                    ? "text-blue-600 border-blue-600 font-semibold"
+                    ? "text-primary border-primary font-semibold"
                     : "text-gray-500 border-transparent hover:border-gray-300"
                 )}
               >
@@ -205,7 +427,7 @@ const ScheduleDetail = () => {
                 className={cn(
                   "shrink-0 pb-2 px-3 text-sm font-medium border-b-2 transition-colors",
                   filter === 'confirmed'
-                    ? "text-blue-600 border-blue-600 font-semibold"
+                    ? "text-primary border-primary font-semibold"
                     : "text-gray-500 border-transparent hover:border-gray-300"
                 )}
               >
@@ -216,11 +438,22 @@ const ScheduleDetail = () => {
                 className={cn(
                   "shrink-0 pb-2 px-3 text-sm font-medium border-b-2 transition-colors",
                   filter === 'pending'
-                    ? "text-blue-600 border-blue-600 font-semibold"
+                    ? "text-primary border-primary font-semibold"
                     : "text-gray-500 border-transparent hover:border-gray-300"
                 )}
               >
                 Pending ({filterCounts.pending})
+              </button>
+              <button
+                onClick={() => setFilter('no-show')}
+                className={cn(
+                  "shrink-0 pb-2 px-3 text-sm font-medium border-b-2 transition-colors",
+                  filter === 'no-show'
+                    ? "text-primary border-primary font-semibold"
+                    : "text-gray-500 border-transparent hover:border-gray-300"
+                )}
+              >
+                No Shows ({filterCounts['no-show']})
               </button>
             </div>
 
@@ -229,11 +462,48 @@ const ScheduleDetail = () => {
               {appointmentsLoading ? (
                 <div className="text-center py-8 text-gray-500">Loading appointments...</div>
               ) : filteredAppointments.length === 0 ? (
-                <div className="text-center py-8 text-gray-500">No appointments scheduled for today</div>
+                <div className="text-center py-8 text-gray-500">
+                  No appointments scheduled for {format(selectedDate, 'MMMM d, yyyy')}
+                </div>
               ) : (
                 filteredAppointments.map((appointment, idx) => {
-                  const aptDate = new Date(appointment.appointment_date);
-                  const timeStr = aptDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+                  // Parse the appointment date - Supabase returns timestamps as ISO strings
+                  // The database stores them in UTC, so we need to ensure proper parsing
+                  const appointmentDateStr = appointment.appointment_date;
+                  
+                  // Ensure the date string is treated as UTC if it doesn't have timezone info
+                  // Supabase should return ISO strings with 'Z' or timezone offset, but be defensive
+                  let aptDate: Date;
+                  if (!appointmentDateStr.includes('T')) {
+                    // Just a date, append time and timezone
+                    aptDate = new Date(appointmentDateStr + 'T00:00:00Z');
+                  } else if (appointmentDateStr.endsWith('Z') || appointmentDateStr.includes('+') || appointmentDateStr.includes('-', 10)) {
+                    // Has timezone info (Z for UTC, or +/- for offset)
+                    aptDate = new Date(appointmentDateStr);
+                  } else {
+                    // No timezone info, treat as UTC (Supabase stores in UTC)
+                    aptDate = new Date(appointmentDateStr + 'Z');
+                  }
+                  
+                  // Debug: Log first appointment to check parsing
+                  if (idx === 0) {
+                    const pacificTime = aptDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/Los_Angeles' });
+                    const utcTime = aptDate.toUTCString();
+                    console.log('🕐 Appointment date parsing:');
+                    console.log('  Raw string:', appointmentDateStr);
+                    console.log('  Parsed ISO:', aptDate.toISOString());
+                    console.log('  Pacific time:', pacificTime);
+                    console.log('  UTC time:', utcTime);
+                    console.log('  Customer:', appointment.customer_name);
+                  }
+                  
+                  // Use user's timezone from settings, default to Pacific time if not set
+                  const displayTimezone = profile?.timezone || 'America/Los_Angeles';
+                  const timeStr = aptDate.toLocaleTimeString('en-US', { 
+                    hour: 'numeric', 
+                    minute: '2-digit',
+                    timeZone: displayTimezone
+                  });
                   const isSelected = selectedAppointment?.id === appointment.id;
                   
                   return (
@@ -243,8 +513,8 @@ const ScheduleDetail = () => {
                       className={cn(
                         "flex gap-4 p-4 justify-between items-start rounded-lg border transition-colors cursor-pointer",
                         isSelected
-                          ? "bg-blue-50 border-blue-500 shadow-sm"
-                          : "bg-white border-gray-200 hover:border-blue-200"
+                          ? "bg-accent border-primary shadow-sm"
+                          : "bg-white border-gray-200 hover:border-primary/30"
                       )}
                     >
                       <div className="flex items-start gap-4 flex-1">
@@ -253,35 +523,65 @@ const ScheduleDetail = () => {
                         </div>
                         <div className="flex flex-1 flex-col justify-center gap-2">
                           <div>
-                            <p className="text-base font-medium text-gray-900">
-                              {timeStr} - {appointment.customer_name} - Initial Consult
-                            </p>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <p className="text-base font-medium text-gray-900">
+                                {timeStr} - {appointment.customer_name} - {appointment.type || 'Initial Consult'}
+                              </p>
+                              {appointment.status && (
+                                <Badge 
+                                  variant={
+                                    appointment.status.toLowerCase() === 'confirmed' ? 'default' :
+                                    appointment.status.toLowerCase() === 'pending' ? 'secondary' :
+                                    appointment.status.toLowerCase() === 'no show' ? 'destructive' :
+                                    'outline'
+                                  }
+                                  className={cn(
+                                    appointment.status.toLowerCase() === 'confirmed' && 'bg-green-100 text-green-800 hover:bg-green-100',
+                                    appointment.status.toLowerCase() === 'pending' && 'bg-yellow-100 text-yellow-800 hover:bg-yellow-100',
+                                    appointment.status.toLowerCase() === 'no show' && 'bg-red-100 text-red-800 hover:bg-red-100',
+                                    appointment.status.toLowerCase() === 'scheduled' && 'bg-blue-100 text-blue-800 hover:bg-blue-100'
+                                  )}
+                                >
+                                  {appointment.status}
+                                </Badge>
+                              )}
+                            </div>
                             {appointment.patient_id && (
                               <p className="text-sm text-gray-600">Age 48, Female</p>
                             )}
+                            {appointment.notes && (
+                              <p className="text-sm text-gray-600 mt-1 italic">{appointment.notes}</p>
+                            )}
                           </div>
-                          {selectedAppointment?.patientInfo && idx === 0 && (
-                            <div className="flex flex-col gap-1 text-sm text-gray-600">
-                              {selectedAppointment.patientInfo.motivation && (
-                                <p className="flex items-start gap-2">
-                                  <span>💙</span>
-                                  <span>Motivation: {selectedAppointment.patientInfo.motivation}</span>
-                                </p>
-                              )}
-                              {selectedAppointment.patientInfo.likelyObjection && (
-                                <p className="flex items-start gap-2">
-                                  <span>🎯</span>
-                                  <span>Likely Objection: {selectedAppointment.patientInfo.likelyObjection}</span>
-                                </p>
-                              )}
-                              {selectedAppointment.patientInfo.pastInteractions && (
-                                <p className="flex items-start gap-2">
-                                  <span>📝</span>
-                                  <span>Past Interactions: {selectedAppointment.patientInfo.pastInteractions}</span>
-                                </p>
-                              )}
-                            </div>
-                          )}
+                          {/* Show patient insights for follow-up appointments or selected appointment */}
+                          {(() => {
+                            const isFollowUp = appointment.type?.toLowerCase() === 'follow-up';
+                            const shouldShowDetails = isFollowUp || (selectedAppointment?.id === appointment.id);
+                            const patientInfo = patientInfoMap.get(appointment.id);
+                            
+                            return shouldShowDetails && patientInfo ? (
+                              <div className="flex flex-col gap-1 text-sm text-gray-600 mt-2">
+                                {patientInfo.motivation && (
+                                  <p className="flex items-start gap-2">
+                                    <span>💙</span>
+                                    <span>Motivation: {patientInfo.motivation}</span>
+                                  </p>
+                                )}
+                                {patientInfo.likelyObjection && (
+                                  <p className="flex items-start gap-2">
+                                    <span>🎯</span>
+                                    <span>Likely Objection: {patientInfo.likelyObjection}</span>
+                                  </p>
+                                )}
+                                {patientInfo.pastInteractions && (
+                                  <p className="flex items-start gap-2">
+                                    <span>📝</span>
+                                    <span>Past Interactions: {patientInfo.pastInteractions}</span>
+                                  </p>
+                                )}
+                              </div>
+                            ) : null;
+                          })()}
                         </div>
                       </div>
                       <div className="shrink-0 flex items-center gap-4 pt-1">
@@ -323,7 +623,7 @@ const ScheduleDetail = () => {
                     {selectedAppointment.email && (
                       <div className="flex items-center gap-3">
                         <MailIcon className="h-5 w-5 text-gray-600" />
-                        <p className="text-blue-600 cursor-pointer hover:underline">
+                        <p className="text-primary cursor-pointer hover:underline">
                           {selectedAppointment.email}
                         </p>
                       </div>
@@ -331,7 +631,7 @@ const ScheduleDetail = () => {
                     {selectedAppointment.phone_number && (
                       <div className="flex items-center gap-3">
                         <PhoneIcon className="h-5 w-5 text-gray-600" />
-                        <p className="text-blue-600 cursor-pointer hover:underline">
+                        <p className="text-primary cursor-pointer hover:underline">
                           {selectedAppointment.phone_number}
                         </p>
                       </div>
@@ -339,16 +639,16 @@ const ScheduleDetail = () => {
                   </div>
                 </div>
 
-                {/* Start Consult Button */}
+                {/* Start Consult + Upload Recording Buttons */}
                 <div className="flex gap-2">
                   <button
                     onClick={isRecording ? handleFinishRecording : handleStartConsult}
-                    className={cn(
-                      "flex-1 flex items-center justify-center rounded-lg h-10 px-4 text-sm font-bold transition-colors",
-                      isRecording
-                        ? "bg-red-600 hover:bg-red-700 text-white"
-                        : "bg-blue-600 hover:bg-blue-700 text-white"
-                    )}
+                      className={cn(
+                        "flex-1 flex items-center justify-center rounded-lg h-10 px-4 text-sm font-bold transition-colors",
+                        isRecording
+                          ? "bg-red-600 hover:bg-red-700 text-white"
+                          : "bg-primary hover:opacity-90 text-white"
+                      )}
                   >
                     {isRecording ? (
                       <>
@@ -362,7 +662,47 @@ const ScheduleDetail = () => {
                       </>
                     )}
                   </button>
+                  <button
+                    onClick={() => setUploadModalOpen(true)}
+                    className={cn(
+                      "flex-1 flex items-center justify-center rounded-lg h-10 px-4 text-sm font-bold transition-colors",
+                      "bg-blue-600 hover:bg-blue-700 text-white"
+                    )}
+                  >
+                    <Upload className="h-4 w-4 mr-2" />
+                    Upload Recording
+                  </button>
                 </div>
+
+                {/* Upload Recording Modal */}
+                <Dialog open={uploadModalOpen} onOpenChange={setUploadModalOpen}>
+                  <DialogContent className="max-w-xl">
+                    <DialogHeader>
+                      <DialogTitle>Upload Pre-recorded Audio</DialogTitle>
+                      <DialogDescription>
+                        Choose an audio file to upload. It will follow the same processing path as live recordings.
+                      </DialogDescription>
+                    </DialogHeader>
+                    {selectedAppointment && (
+                      <AudioUploadModal
+                        open={true}
+                        onOpenChange={setUploadModalOpen}
+                        appointment={{
+                          id: selectedAppointment.id,
+                          customer_name: selectedAppointment.customer_name,
+                          appointment_date: selectedAppointment.appointment_date,
+                          status: 'recent',
+                          timeDescription: 'Uploaded',
+                          patient_id: (selectedAppointment as any)?.patient_id || null
+                        }}
+                        onUploadComplete={() => {
+                          setUploadModalOpen(false);
+                          loadCalls(50);
+                        }}
+                      />
+                    )}
+                  </DialogContent>
+                </Dialog>
 
                 {/* Patient History & Notes */}
                 <div className="flex flex-col gap-4 mt-2 flex-1">

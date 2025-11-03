@@ -552,7 +552,8 @@ class EnhancedContextManager:
                     "success": False,
                     "error": "Failed to create context item"
                 }
-                
+        except Exception as e:
+            logger.error(f"Error adding context item: {e}")
             return {
                 "success": False,
                 "error": str(e)

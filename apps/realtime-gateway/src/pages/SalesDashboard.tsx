@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -42,17 +42,16 @@ const SalesDashboard = () => {
   const { appointments: dbAppointments, loading: appointmentsLoading } = useAppointments();
   const { metrics, loading: metricsLoading } = useDashboardMetrics();
   
-  const [activities, setActivities] = useState<RecentActivity[]>([]);
-
+  // Load calls on mount
   useEffect(() => {
     if (user && profile) {
       loadCalls(10);
-      generateActivityFeed();
     }
-  }, [user, profile, calls, dbAppointments]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, profile]);
 
-  // Generate activity feed from calls and appointments
-  const generateActivityFeed = () => {
+  // Generate activity feed from calls and appointments (memoized)
+  const activities = useMemo(() => {
     const activitiesList: RecentActivity[] = [];
     
     // Add recent calls as activities
@@ -105,8 +104,8 @@ const SalesDashboard = () => {
       });
     }
 
-    setActivities(activitiesList);
-  };
+    return activitiesList;
+  }, [calls, dbAppointments]);
 
   const getGreeting = () => {
     const hour = new Date().getHours();
@@ -124,33 +123,36 @@ const SalesDashboard = () => {
     }).format(amount);
   };
 
+  // Debug loading state
   if (!user || !profile) {
+    console.log('⏳ SalesDashboard: Waiting for user or profile - user:', !!user, 'profile:', !!profile);
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
           <div className="text-lg">Loading...</div>
+          <div className="text-sm text-gray-500 mt-2">Waiting for authentication...</div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50 flex">
       {/* Left Sidebar */}
       <SalesDashboardSidebar />
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex-1 flex flex-col overflow-hidden bg-gradient-to-br from-gray-50/50 to-white">
         {/* Top Header Bar */}
-        <div className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-6">
+        <div className="h-16 bg-white/80 backdrop-blur-sm border-b border-border/50 flex items-center justify-between px-6 shadow-sm">
           <div className="flex-1 max-w-lg relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input 
               placeholder="Search leads, tasks..." 
-              className="w-full pl-10"
+              className="w-full pl-10 bg-white/90 border-border/50 focus:bg-white focus:border-primary/30 transition-colors"
             />
           </div>
-          <Button className="bg-blue-600 hover:bg-blue-700">
+          <Button className="bg-primary hover:bg-primary/90 text-white shadow-sm hover:shadow-md transition-all">
             <Plus className="h-4 w-4 mr-2" />
             New Lead
           </Button>
@@ -161,10 +163,10 @@ const SalesDashboard = () => {
           <div className="p-8 max-w-7xl mx-auto">
             {/* Greeting */}
             <div className="mb-8">
-              <h1 className="text-3xl font-bold text-gray-900">
+              <h1 className="text-3xl font-bold text-foreground mb-2">
                 {getGreeting()}, {profile.salesperson_name || 'Alex'}
               </h1>
-              <p className="text-gray-600 mt-2">
+              <p className="text-muted-foreground text-base">
                 Here's your sales overview for today.
               </p>
             </div>
@@ -175,28 +177,28 @@ const SalesDashboard = () => {
                 title="New Leads This Week"
                 value={metrics.newLeadsThisWeek}
                 change={metrics.newLeadsChange}
-                isPositive={metrics.newLeadsChange > 0}
+                isPositive={metrics.newLeadsChange >= 0}
                 icon={<TrendingUp className="h-4 w-4" />}
               />
               <MetricCard
                 title="Consultations Booked"
                 value={metrics.consultationsBooked}
                 change={metrics.consultationsChange}
-                isPositive={metrics.consultationsChange > 0}
+                isPositive={metrics.consultationsChange >= 0}
                 icon={<TrendingUp className="h-4 w-4" />}
               />
               <MetricCard
                 title="Deals Closed (Month)"
                 value={metrics.dealsClosedThisMonth}
                 change={metrics.dealsClosedChange}
-                isPositive={metrics.dealsClosedChange > 0}
-                icon={<TrendingDown className="h-4 w-4" />}
+                isPositive={metrics.dealsClosedChange >= 0}
+                icon={<TrendingUp className="h-4 w-4" />}
               />
               <MetricCard
                 title="Revenue Generated"
                 value={formatCurrency(metrics.revenueGenerated)}
                 change={metrics.revenueChange}
-                isPositive={metrics.revenueChange > 0}
+                isPositive={metrics.revenueChange >= 0}
                 icon={<TrendingUp className="h-4 w-4" />}
                 editable
               />
@@ -205,11 +207,16 @@ const SalesDashboard = () => {
             {/* Today's Focus and Recent Activity */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               {/* Today's Focus */}
-              <Card>
-                <CardHeader>
+              <Card className="bg-white border-border shadow-sm hover:shadow-md transition-shadow">
+                <CardHeader className="pb-4">
                   <div className="flex items-center justify-between">
-                    <CardTitle>Today's Focus</CardTitle>
-                    <Button variant="ghost" size="sm" className="text-blue-600">
+                    <CardTitle className="text-lg font-semibold text-foreground">Today's Focus</CardTitle>
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      className="text-primary hover:text-primary/80 hover:bg-accent/50 transition-colors"
+                      onClick={() => navigate('/schedule')}
+                    >
                       View All
                     </Button>
                   </div>
@@ -217,63 +224,94 @@ const SalesDashboard = () => {
                 <CardContent className="space-y-6">
                   {/* Scheduled Appointments */}
                   <div>
-                    <h4 className="text-sm font-medium text-gray-900 mb-4">Scheduled Appointments</h4>
-                    <div className="space-y-4">
+                    <h4 className="text-sm font-semibold text-foreground mb-4 uppercase tracking-wide">Scheduled Appointments</h4>
+                    <div className="space-y-3">
                       {dbAppointments && dbAppointments.length > 0 ? (
-                        dbAppointments.slice(0, 3).map((apt, idx) => {
+                        dbAppointments.map((apt, idx) => {
                           const aptDate = new Date(apt.appointment_date);
-                          const timeStr = aptDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+                          // Use user's timezone if available, otherwise default to America/Los_Angeles for business hours
+                          // This ensures appointments created in Pacific time display correctly
+                          const displayTimezone = profile?.timezone || 'America/Los_Angeles';
+                          const timeStr = aptDate.toLocaleTimeString('en-US', { 
+                            hour: 'numeric', 
+                            minute: '2-digit',
+                            timeZone: displayTimezone
+                          });
                           const today = new Date();
                           const isToday = aptDate.toDateString() === today.toDateString();
                           
                           return (
-                            <div key={apt.id} className="flex items-start justify-between group">
+                            <div 
+                              key={apt.id} 
+                              className="flex items-start justify-between group p-3 rounded-lg hover:bg-accent/30 transition-colors cursor-pointer border border-transparent hover:border-primary/20"
+                              onClick={() => navigate('/schedule')}
+                            >
                               <div className="flex items-start space-x-3 flex-1">
-                                <CalendarIcon className="h-5 w-5 text-gray-400 mt-0.5" />
+                                <div className="mt-0.5 p-1.5 rounded-md bg-primary/10">
+                                  <CalendarIcon className="h-4 w-4 text-primary" />
+                                </div>
                                 <div className="flex-1">
-                                  <p className="font-medium text-gray-900">{timeStr} - {apt.customer_name}</p>
-                                  <p className="text-sm text-gray-600">
+                                  <p className="font-semibold text-foreground">{timeStr} - {apt.customer_name}</p>
+                                  <p className="text-sm text-muted-foreground mt-0.5">
                                     {isToday ? 'Today' : aptDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                                   </p>
                                 </div>
                               </div>
-                              <Button variant="ghost" size="sm" className="opacity-0 group-hover:opacity-100">
+                              <Button variant="ghost" size="sm" className="opacity-0 group-hover:opacity-100 h-8 w-8 p-0">
                                 <MoreVertical className="h-4 w-4" />
                               </Button>
                             </div>
                           );
                         })
                       ) : (
-                        <p className="text-sm text-gray-500 text-center py-4">No appointments scheduled for today</p>
+                        <div className="text-center py-8">
+                          <CalendarIcon className="h-12 w-12 text-muted-foreground/30 mx-auto mb-3" />
+                          <p className="text-sm text-muted-foreground">No appointments scheduled for today</p>
+                        </div>
                       )}
                     </div>
                   </div>
-
-                  {/* Recent Activity Section moved below */}
                 </CardContent>
               </Card>
 
               {/* Recent Activity */}
-              <Card>
-                <CardHeader>
+              <Card className="bg-white border-border shadow-sm hover:shadow-md transition-shadow">
+                <CardHeader className="pb-4">
                   <div className="flex items-center justify-between">
-                    <CardTitle>Recent Activity</CardTitle>
-                    <Button variant="ghost" size="sm" className="text-blue-600">
+                    <CardTitle className="text-lg font-semibold text-foreground">Recent Activity</CardTitle>
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      className="text-primary hover:text-primary/80 hover:bg-accent/50 transition-colors"
+                      onClick={() => navigate('/activity')}
+                    >
                       View All
                     </Button>
                   </div>
                 </CardHeader>
                 <CardContent>
-                  <div className="space-y-4">
-                    {activities.map((activity, idx) => (
-                      <div key={idx} className="flex items-start space-x-3">
-                        <div className="mt-0.5">{activity.icon}</div>
-                        <div className="flex-1">
-                          <p className="text-sm text-gray-900">{activity.message}</p>
-                          <p className="text-xs text-gray-500 mt-1">{activity.timestamp}</p>
+                  <div className="space-y-3">
+                    {activities.length > 0 ? (
+                      activities.map((activity, idx) => (
+                        <div 
+                          key={idx} 
+                          className="flex items-start space-x-3 p-2 rounded-lg hover:bg-accent/30 transition-colors"
+                        >
+                          <div className="mt-0.5 p-1.5 rounded-md bg-primary/10 text-primary flex-shrink-0">
+                            {activity.icon}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-foreground leading-relaxed">{activity.message}</p>
+                            <p className="text-xs text-muted-foreground mt-1">{activity.timestamp}</p>
+                          </div>
                         </div>
+                      ))
+                    ) : (
+                      <div className="text-center py-8">
+                        <Phone className="h-12 w-12 text-muted-foreground/30 mx-auto mb-3" />
+                        <p className="text-sm text-muted-foreground">No recent activity</p>
                       </div>
-                    ))}
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -289,7 +327,7 @@ interface MetricCardProps {
   title: string;
   value: string | number;
   change: number;
-  isPositive: boolean;
+  isPositive?: boolean; // Always true now, but kept for backward compatibility
   icon: React.ReactNode;
   editable?: boolean;
 }
@@ -298,34 +336,46 @@ const MetricCard: React.FC<MetricCardProps> = ({
   title, 
   value, 
   change, 
-  isPositive, 
+  isPositive,
   icon,
   editable 
 }) => {
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-        <CardTitle className="text-sm font-medium text-gray-600">{title}</CardTitle>
-        {editable && (
-          <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
-            <Pencil className="h-4 w-4" />
-          </Button>
-        )}
+    <Card className="bg-white/90 backdrop-blur-sm border-border/50 shadow-sm hover:shadow-md hover:border-primary/20 transition-all group">
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+        <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">{title}</CardTitle>
+        <div className="flex items-center gap-2">
+          <div className="p-1.5 rounded-md bg-primary/10 text-primary opacity-70 group-hover:opacity-100 transition-opacity">
+            {icon}
+          </div>
+          {editable && (
+            <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-muted-foreground hover:text-primary hover:bg-accent/50 opacity-0 group-hover:opacity-100 transition-all">
+              <Pencil className="h-3.5 w-3.5" />
+            </Button>
+          )}
+        </div>
       </CardHeader>
-      <CardContent>
-        <div className="text-2xl font-bold">{value}</div>
-        <div className="flex items-center space-x-1 mt-2">
+      <CardContent className="pt-0">
+        <div className="text-3xl font-bold text-foreground mb-3">{value}</div>
+        <div className="flex items-center space-x-1.5">
           {isPositive ? (
             <>
-              <TrendingUp className="h-4 w-4 text-green-600" />
-              <span className="text-sm text-green-600">{Math.abs(change)}%</span>
+              <div className="flex items-center space-x-1 px-2 py-1 rounded-md bg-primary/10">
+                <TrendingUp className="h-3.5 w-3.5 text-primary" />
+                <span className="text-sm text-primary font-semibold">+{change}%</span>
+              </div>
             </>
           ) : (
             <>
-              <TrendingDown className="h-4 w-4 text-red-600" />
-              <span className="text-sm text-red-600">{Math.abs(change)}%</span>
+              <div className="flex items-center space-x-1 px-2 py-1 rounded-md bg-destructive/10">
+                <TrendingDown className="h-3.5 w-3.5 text-destructive" />
+                <span className="text-sm text-destructive font-semibold">{change}%</span>
+              </div>
             </>
           )}
+          <span className="text-xs text-muted-foreground">
+            vs last period
+          </span>
         </div>
       </CardContent>
     </Card>

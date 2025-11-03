@@ -15,6 +15,11 @@
     "test:watch": "vitest --watch",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:integration:ci": "vitest run --config vitest.integration.config.ts --coverage --reporter=junit --outputFile=integration-test-results.xml",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:debug": "playwright test --debug",
+    "test:e2e:report": "playwright show-report",
     "clean": "rm -rf dist",
     "preview": "vite preview"
   },
@@ -67,6 +72,7 @@
     "zod": "^3.22.4"
   },
   "devDependencies": {
+    "@playwright/test": "^1.56.1",
     "@testing-library/jest-dom": "^6.0.0",
     "@testing-library/react": "^14.0.0",
     "@testing-library/user-event": "^14.0.0",

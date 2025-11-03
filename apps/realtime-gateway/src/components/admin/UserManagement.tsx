@@ -9,6 +9,7 @@ import { useSystemAdmin } from '@/hooks/useSystemAdmin';
 import { useOrganizations } from '@/hooks/useOrganizations';
 import { useOrganizationData } from '@/hooks/useOrganizationData';
 import { UserRole } from '@/hooks/useUserRoles';
+import { InviteUserDialog } from './InviteUserDialog';
 
 interface UserFormData {
   email: string;
@@ -98,8 +99,15 @@ export const UserManagement = () => {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Create New User</CardTitle>
-        <CardDescription>Add users and assign roles and organizational access</CardDescription>
+        <div className="flex justify-between items-center">
+          <div>
+            <CardTitle>Create New User</CardTitle>
+            <CardDescription>Add users and assign roles and organizational access</CardDescription>
+          </div>
+          {formData.organizationId && (
+            <InviteUserDialog organizationId={formData.organizationId} />
+          )}
+        </div>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-6">

@@ -1,0 +1,24 @@
+CODE METRICS SUMMARY
+====================
+
+Application Code: 5,458 lines (excluding tests)
+Test Code: 27,260 lines (test files)
+
+Modules WITHOUT tests:
+- Enhanced Context API (176 lines)
+- Organization Hierarchy API (206 lines)
+- Organization Toggles API (187 lines)
+- RAG Features API (181 lines)
+- Validation Middleware (177 lines)
+- Feature Inheritance Service (144 lines)
+
+Total untested code: 1,071 lines
+
+Modules WITH tests:
+- Audit Service ✅ (82.73% coverage)
+- Context Manager ✅ (56.91% coverage)
+- Permissions Middleware ✅ (47.65% coverage)
+- Enhanced Context Manager (25.86% coverage)
+- Tenant Isolation Service (29.32% coverage)
+- Supabase Client (35.63% coverage)
+

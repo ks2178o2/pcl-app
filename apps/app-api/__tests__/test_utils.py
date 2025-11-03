@@ -92,10 +92,18 @@ class SupabaseMockBuilder:
         def range_side_effect(start, end):
             # Simulate pagination by slicing the data
             paginated_data = data[start:end+1] if start < len(data) else []
-            return Mock(data=paginated_data, count=len(data))
+            result = Mock()
+            result.data = paginated_data if isinstance(paginated_data, list) else []
+            result.count = len(data)
+            return result
         
         select_chain.range.side_effect = range_side_effect
-        select_chain.execute.return_value = Mock(data=data, count=len(data))
+        
+        # Create execute result with proper data attribute
+        execute_result = Mock()
+        execute_result.data = data if isinstance(data, list) else []
+        execute_result.count = len(data) if isinstance(data, list) else 0
+        select_chain.execute.return_value = execute_result
         
         # Setup single response
         single_chain = Mock()
@@ -143,9 +151,54 @@ class SupabaseMockBuilder:
         
         table_mock.select.return_value = select_error_chain
     
+    def setup_query_with_count(self, table_name: str, data: List[Dict[str, Any]], total_count: int = None):
+        """Setup query chain that supports count queries for get_audit_logs"""
+        if table_name not in self.table_mocks:
+            self.create_table_mock(table_name)
+        
+        table_mock = self.table_mocks[table_name]
+        
+        # Create chain for the main query
+        main_result = Mock()
+        main_result.data = data if isinstance(data, list) else []
+        
+        select_chain = Mock()
+        select_chain.eq.return_value = select_chain
+        select_chain.order.return_value = select_chain
+        
+        range_result = Mock()
+        range_result.data = data if isinstance(data, list) else []
+        range_result.count = len(data) if isinstance(data, list) else 0
+        select_chain.range = Mock(return_value=range_result)
+        
+        table_mock.select.return_value = select_chain
+        
+        # Setup count query
+        count_result = Mock()
+        count_result.count = total_count if total_count is not None else len(data) if isinstance(data, list) else 0
+        
+        # Create a separate table mock for count query
+        count_table_mock = Mock()
+        count_select_chain = Mock()
+        count_select_chain.eq.return_value = count_select_chain
+        count_select_chain.execute = Mock(return_value=count_result)
+        count_table_mock.select = Mock(return_value=count_select_chain)
+        
+        # Store count mock
+        self.count_table_mocks = getattr(self, 'count_table_mocks', {})
+        self.count_table_mocks[table_name] = count_table_mock
+    
     def get_mock_client(self):
         """Get the configured mock client"""
         def mock_from_side_effect(table_name):
+            # Check if this is a count query (second call)
+            if hasattr(self, 'count_table_mocks') and table_name in self.count_table_mocks:
+                # Return count table mock for second call
+                count_mock = self.count_table_mocks[table_name]
+                # Don't return count mock again
+                del self.count_table_mocks[table_name]
+                return count_mock
+            
             if table_name in self.table_mocks:
                 return self.table_mocks[table_name]
             else:

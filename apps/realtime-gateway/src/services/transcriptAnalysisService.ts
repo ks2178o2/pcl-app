@@ -159,42 +159,26 @@ export type LLMProvider = 'gemini' | 'openai';
 export type AnalysisEngine = 'auto' | 'vendor' | 'llm';
 
 class TranscriptAnalysisService {
-  private async callLLM(prompt: string, provider: LLMProvider = 'gemini'): Promise<string> {
-    try {
-      const { supabase } = await import('@/integrations/supabase/client');
-      
-      const functionName = provider === 'gemini' ? 'analyze-transcript-gemini' : 'analyze-transcript';
-      
-      const { data, error } = await supabase.functions.invoke(functionName, {
-        body: { prompt },
-      });
-
-      if (error) {
-        console.error(`${provider} Edge Function error:`, error);
-        
-        // Check if this is a rate limit error
-        if (error.message?.includes('Rate limit') || error.message?.includes('429')) {
-          throw new Error(`${provider} rate limit exceeded. Please try again in a few minutes.`);
-        }
-        
-        throw new Error(`Failed to analyze transcript with ${provider}: ${error.message}`);
-      }
-
-      if (!data || !data.analysis) {
-        // Check if data contains rate limit error
-        if (data?.error?.includes('Rate limit')) {
-          throw new Error(`${provider} rate limit exceeded. Please try again in a few minutes.`);
-        }
-        
-        console.error(`No analysis data returned from ${provider} edge function:`, data);
-        throw new Error(`${provider} edge function returned empty response`);
-      }
-
-      return data.analysis;
-    } catch (error) {
-      console.error(`Error calling ${provider}:`, error);
-      throw error;
+  private async callLLM(prompt: string): Promise<string> {
+    const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8001';
+    const { supabase } = await import('@/integrations/supabase/client');
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData?.session?.access_token;
+    const resp = await fetch(`${API_BASE_URL}/api/analysis/analyze`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ prompt }),
+    });
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error(`Backend analysis failed: ${resp.status} ${text}`);
     }
+    const json = await resp.json();
+    if (!json?.analysis) throw new Error('No analysis returned');
+    return json.analysis as string;
   }
 
   private async callWithFallback(prompt: string): Promise<{ analysis: string, provider: string }> {
@@ -227,9 +211,8 @@ class TranscriptAnalysisService {
       const { supabase } = await import('@/integrations/supabase/client');
       const { data, error } = await supabase
         .from('call_analyses')
-        .select('analysis_data, status')
+        .select('analysis_data')
         .eq('call_record_id', callRecordId)
-        .eq('status', 'completed')
         .maybeSingle();
 
       if (error) throw error;

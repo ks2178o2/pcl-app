@@ -67,8 +67,8 @@ export const CallsSearch: React.FC = () => {
         .from('call_records')
         .select('*, centers(name)')
         .eq('user_id', user.id)
-        .eq('is_active', true)
-        .order('created_at', { ascending: false });
+        .eq('recording_complete', true)
+        .order('start_time', { ascending: false });
 
       if (error) throw error;
 
@@ -284,7 +284,7 @@ export const CallsSearch: React.FC = () => {
     try {
       const { error } = await supabase
         .from('call_records')
-        .update({ is_active: false })
+        .update({ recording_complete: false })
         .eq('id', call.id)
         .eq('user_id', user!.id);
 

@@ -1,0 +1,30 @@
+Test Coverage by Module
+================================================================================
+Module                           Coverage %    Tests: Passed/Total    Pass %
+================================================================================
+Audit Service                        82.73%        18 / 22            81.8%
+Context Manager                      56.91%         7 /  7           100.0%
+Tenant Isolation Service             29.32%        16 / 16           100.0%
+Enhanced Context Manager             25.86%        N/A              N/A
+Supabase Client                      35.63%        N/A              N/A
+Permissions Middleware               47.65%        29 / 31            93.5%
+Feature Inheritance Service           0.00%        N/A              N/A
+================================================================================
+OVERALL TOTALS                       23.29%        95 / 101           94.1%
+================================================================================
+
+Test Suite Statistics:
+- Total Tests Available: 1,231 (6 collection errors)
+- Tests Run: 101
+- Passed: 95
+- Failed: 6
+- Pass Rate: 94.1%
+
+Module Status:
+✅ Audit Service: 82.73% coverage (highest)
+✅ Context Manager: 56.91% coverage  
+✅ Tenant Isolation Service: 29.32% coverage
+🟡 Permissions Middleware: 47.65% coverage
+🟡 Enhanced Context Manager: 25.86% coverage
+🟡 Supabase Client: 35.63% coverage
+🔴 Feature Inheritance Service: 0% coverage
