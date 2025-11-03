@@ -511,7 +511,9 @@ def _transcribe_with_assemblyai(signed_url: str) -> str:
     }
     payload = { 'audio_url': signed_url }
     r = requests.post('https://api.assemblyai.com/v2/transcript', json=payload, headers=headers, timeout=30)
-    r.raise_for_status()
+    if not r.ok:
+        logger.error(f"AssemblyAI create error: {r.status_code} {r.text}")
+        r.raise_for_status()
     job_id = r.json().get('id')
     if not job_id:
         raise RuntimeError('AssemblyAI: missing job id')
@@ -519,7 +521,9 @@ def _transcribe_with_assemblyai(signed_url: str) -> str:
     # Poll until completed/failed
     for _ in range(60):  # up to ~60 * 2s = 2 minutes
         s = requests.get(f'https://api.assemblyai.com/v2/transcript/{job_id}', headers=headers, timeout=15)
-        s.raise_for_status()
+        if not s.ok:
+            logger.error(f"AssemblyAI poll error: {s.status_code} {s.text}")
+            s.raise_for_status()
         data = s.json()
         status = data.get('status')
         if status == 'completed':
@@ -542,8 +546,12 @@ def _transcribe_with_deepgram(signed_url: str) -> str:
         'Content-Type': 'application/json'
     }
     payload = { 'url': signed_url }
+    preview = signed_url[:80] + ('...' if len(signed_url) > 80 else '')
+    logger.info(f"Deepgram request starting for URL: {preview}")
     r = requests.post('https://api.deepgram.com/v1/listen?smart_format=true', json=payload, headers=headers, timeout=60)
-    r.raise_for_status()
+    if not r.ok:
+        logger.error(f"Deepgram error: {r.status_code} {r.text}")
+        r.raise_for_status()
     data = r.json()
     # Extract transcript from Deepgram JSON
     try:
@@ -597,6 +605,33 @@ async def get_transcription_status(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error fetching status: {str(e)}"
         )
+
+
+@router.get("/self-test", response_model=dict)
+async def transcribe_self_test(user=Depends(require_system_admin)):
+    """Quick provider self-test using a public audio URL.
+    Returns provider results or error details to validate keys/connectivity.
+    """
+    deepgram_key = os.getenv('DEEPGRAM_API_KEY')
+    assembly_key = os.getenv('ASSEMBLYAI_API_KEY') or os.getenv('ASSEMBLY_AI_API_KEY')
+    # Public test audio sample (small file)
+    test_url = os.getenv('TRANSCRIBE_TEST_URL', 'https://www2.cs.uic.edu/~i101/SoundFiles/StarWars60.wav')
+    results = {}
+    if deepgram_key:
+        try:
+            txt = _transcribe_with_deepgram(test_url)
+            results['deepgram'] = {'ok': True, 'sample': txt[:160]}
+        except Exception as e:
+            results['deepgram'] = {'ok': False, 'error': str(e)}
+    if assembly_key:
+        try:
+            txt = _transcribe_with_assemblyai(test_url)
+            results['assemblyai'] = {'ok': True, 'sample': txt[:160]}
+        except Exception as e:
+            results['assemblyai'] = {'ok': False, 'error': str(e)}
+    if not results:
+        return {'warning': 'No provider keys set', 'test_url': test_url}
+    return {'test_url': test_url, 'results': results}
 
 
 @router.get("/list", response_model=TranscriptionListResponse)
