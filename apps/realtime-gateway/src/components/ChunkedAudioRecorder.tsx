@@ -450,8 +450,31 @@ export const ChunkedAudioRecorder: React.FC<ChunkedAudioRecorderProps> = ({
         });
       };
 
+      // Retry helper for 409 not_ready
+      const invokeWithRetry = async (prov: string, maxRetries = 3) => {
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+          const { data, error } = await invoke(prov);
+          
+          // If not ready, wait and retry
+          if (data?.not_ready === true && attempt < maxRetries) {
+            console.log(`⏳ Attempt ${attempt}: Not ready yet, retrying in 2s...`);
+            toast({ 
+              title: 'Finalizing recording', 
+              description: `Waiting for all chunks... (attempt ${attempt}/${maxRetries})` 
+            });
+            await new Promise(r => setTimeout(r, 2000));
+            continue;
+          }
+          
+          return { data, error };
+        }
+        
+        // Max retries exceeded
+        throw new Error('Recording not ready after multiple attempts');
+      };
+
       toast({ title: 'Starting transcription', description: `Using ${provider === 'deepgram' ? 'Deepgram' : 'AssemblyAI'}` });
-      let { data, error } = await invoke(provider);
+      let { data, error } = await invokeWithRetry(provider);
 
       // Check for 404 - function not deployed
       if (error?.message?.includes('404') || error?.message?.includes('not found')) {
@@ -523,8 +546,9 @@ export const ChunkedAudioRecorder: React.FC<ChunkedAudioRecorderProps> = ({
             }
           }
 
-          // Combine all chunks into single blob
-          const combinedBlob = new Blob(audioBlobs, { type: 'audio/webm' });
+          // Combine all chunks into single blob using proper re-encoding
+          const { reencodeAudioSlices } = await import('@/services/audioReencodingService');
+          const combinedBlob = await reencodeAudioSlices(audioBlobs);
           
           // Convert to base64
           const base64Audio = await new Promise<string>((resolve, reject) => {

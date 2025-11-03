@@ -35,78 +35,47 @@ export const useCallRecords = () => {
     console.log('🔄 Loading calls from database for user:', user.id, limit ? `(limit: ${limit})` : '');
 
     try {
+      console.log('🔍 Starting query for user:', user.id, limit ? `limit: ${limit}` : '');
+      
+      // Restore original working query pattern with proper chaining
       let query = supabase
         .from('call_records')
-        .select('*')
+        .select('*')  // Try SELECT * like appointments
         .eq('user_id', user.id)
-        .eq('is_active', true)
-        .order('created_at', { ascending: false });
+        .eq('recording_complete', true);  // Use recording_complete instead of is_active
       
       if (limit) {
         query = query.limit(limit);
       }
+      
+      query = query.order('start_time', { ascending: false });  // Use start_time instead of created_at
 
+      console.log('⏳ Executing query...');
       const { data, error } = await query;
+      console.log('✅ Query completed, data:', data?.length || 0, 'records');
 
-      if (error) throw error;
+      if (error) {
+        console.error('❌ Error in loadCalls query:', error);
+        throw error;
+      }
+      
+      console.log('📊 Query returned', data?.length || 0, 'records');
 
-      console.log('✅ Successfully loaded', data.length, 'calls from database');
-
-      const formattedCalls: CallRecord[] = await Promise.all(data.map(async record => {
-        let audioBlob: Blob | undefined;
-        let derivedAudioPath: string | undefined = record.audio_file_url || undefined;
-        
-        // Try to fetch audio blob if URL exists
-        if (record.audio_file_url) {
-          try {
-            const { data: signedUrlData, error: signedUrlError } = await supabase.storage
-              .from('call-recordings')
-              .createSignedUrl(record.audio_file_url, 60 * 60); // 1 hour expiry
-
-            if (!signedUrlError && signedUrlData?.signedUrl) {
-              const response = await fetch(signedUrlData.signedUrl);
-              if (response.ok) {
-                audioBlob = await response.blob();
-              }
-            }
-          } catch (error) {
-            console.warn('Could not fetch audio for call:', record.id, error);
-          }
-        } else {
-          // No combined audio file yet — derive path from first uploaded chunk (common for short recordings)
-          try {
-            const { data: firstChunk } = await supabase
-              .from('call_chunks')
-              .select('file_path')
-              .eq('call_record_id', record.id)
-              .eq('upload_status', 'uploaded')
-              .order('chunk_number', { ascending: true })
-              .limit(1)
-              .maybeSingle();
-            if (firstChunk?.file_path) {
-              derivedAudioPath = firstChunk.file_path;
-            }
-          } catch (e) {
-            console.warn('Could not derive audio path from chunks for call:', record.id, e);
-          }
-        }
-
-        return {
-          id: record.id,
-          patientName: record.customer_name,
-          salespersonName: 'You', // Will be filled by parent component
-          duration: record.duration_seconds || 0,
-          timestamp: new Date(record.created_at),
-          status: 'completed' as const,
-          transcript: record.transcript || undefined,
-          audioBlob,
-          audioPath: derivedAudioPath,
-          diarizationSegments: (record as any).diarization_segments || [],
-          speakerMapping: (record as any).speaker_mapping || {},
-          diarizationConfidence: (record as any).diarization_confidence || 0,
-          numSpeakers: (record as any).num_speakers || 2,
-          patientId: (record as any).patient_id || undefined
-        };
+      // Format the data - simplified version without expensive audio fetching
+      const formattedCalls: CallRecord[] = (data || []).map(record => ({
+        id: record.id,
+        patientName: record.customer_name,
+        salespersonName: 'You', // Will be filled by parent component
+        duration: record.duration_seconds || 0,
+        timestamp: new Date(record.start_time || record.created_at),
+        status: 'completed' as const,
+        transcript: record.transcript || undefined,
+        audioPath: record.audio_file_url || undefined,
+        diarizationSegments: (record as any).diarization_segments || [],
+        speakerMapping: (record as any).speaker_mapping || {},
+        diarizationConfidence: (record as any).diarization_confidence || 0,
+        numSpeakers: (record as any).num_speakers || 2,
+        patientId: (record as any).patient_id || undefined
       }));
 
       setCalls(formattedCalls);

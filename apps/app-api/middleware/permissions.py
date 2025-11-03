@@ -319,9 +319,12 @@ class PermissionChecker:
         return []
 
 def validate_permissions(user_data: Dict[str, Any], action: str, 
-                        target_org_id: str, feature_name: Optional[str] = None) -> bool:
+                        target_org_id: str, feature_name: Optional[str] = None,
+                        supabase: Client = None) -> bool:
     """Validate permissions for a specific action"""
-    checker = PermissionChecker(user_data)
+    if supabase is None:
+        supabase = get_supabase_client()
+    checker = PermissionChecker(user_data, supabase)
     
     if action == "manage_rag_features":
         return checker.can_manage_rag_features(target_org_id)

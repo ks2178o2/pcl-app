@@ -5,14 +5,20 @@ import { OrganizationSetup } from '@/components/admin/OrganizationSetup';
 import { UserManagement } from '@/components/admin/UserManagement';
 import { AdminManagement } from '@/components/admin/AdminManagement';
 import { IdleTimeoutManagement } from '@/components/admin/IdleTimeoutManagement';
+import RAGFeatureManagement from '@/components/admin/RAGFeatureManagement';
+import { EnhancedContextManagement } from '@/components/admin/EnhancedContextManagement';
+import { EnhancedUploadManager } from '@/components/admin/EnhancedUploadManager';
+import { RAGPermissionsManager } from '@/components/admin/RAGPermissionsManager';
 import { useUserRoles } from '@/hooks/useUserRoles';
 import { useSecureAdminAccess } from '@/hooks/useSecureAdminAccess';
+import { useOrganizationData } from '@/hooks/useOrganizationData';
 import { Navigate } from 'react-router-dom';
-import { Shield, Building, Users, BarChart3 } from 'lucide-react';
+import { Shield, Building, Users, BarChart3, Settings2, Database, Lock } from 'lucide-react';
 import SystemCheck from './SystemCheck';
 
 export const SystemAdmin = () => {
   const { loading, roles } = useUserRoles();
+  const { organizationId } = useOrganizationData();
   const { 
     shouldShowAdminNavigation,
     hasAnyAdminAccess,
@@ -87,7 +93,7 @@ export const SystemAdmin = () => {
       </div>
 
       <Tabs defaultValue="organizations" className="space-y-6">
-        <TabsList className={`grid w-full ${canManageSystem ? 'grid-cols-6' : 'grid-cols-4'}`}>
+        <TabsList className={`grid w-full ${canManageSystem ? 'grid-cols-9' : 'grid-cols-6'}`}>
           {canManageSystem && (
             <TabsTrigger value="organizations" className="flex items-center gap-2">
               <Building className="h-4 w-4" />
@@ -104,6 +110,18 @@ export const SystemAdmin = () => {
               Users
             </TabsTrigger>
           )}
+          <TabsTrigger value="rag-features" className="flex items-center gap-2">
+            <Settings2 className="h-4 w-4" />
+            RAG Features
+          </TabsTrigger>
+          <TabsTrigger value="rag-permissions" className="flex items-center gap-2">
+            <Lock className="h-4 w-4" />
+            RAG Permissions
+          </TabsTrigger>
+          <TabsTrigger value="knowledge-base" className="flex items-center gap-2">
+            <Database className="h-4 w-4" />
+            Knowledge Base
+          </TabsTrigger>
           <TabsTrigger value="timeout-settings" className="flex items-center gap-2">
             <Shield className="h-4 w-4" />
             Timeout Settings
@@ -163,6 +181,52 @@ export const SystemAdmin = () => {
 
         <TabsContent value="timeout-settings">
           <IdleTimeoutManagement />
+        </TabsContent>
+
+        <TabsContent value="rag-features">
+          <Card>
+            <CardHeader>
+              <CardTitle>RAG Feature Management</CardTitle>
+              <CardDescription>
+                Configure RAG features for your organization. Enable or disable features based on your needs.
+              </CardDescription>
+            </CardHeader>
+              <CardContent>
+              <RAGFeatureManagement organizationId={organizationId || ""} />
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="rag-permissions">
+          <RAGPermissionsManager />
+        </TabsContent>
+
+        <TabsContent value="knowledge-base">
+          <div className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>Knowledge Base Management</CardTitle>
+                <CardDescription>
+                  Manage global context items, tenant access, and context sharing for organization: {organizationId}
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <EnhancedContextManagement />
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Upload Manager</CardTitle>
+                <CardDescription>
+                  Upload knowledge base content via files, web scraping, or bulk API operations.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <EnhancedUploadManager />
+              </CardContent>
+            </Card>
+          </div>
         </TabsContent>
 
         {canManageSystem && (

@@ -14,6 +14,22 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import uvicorn
 from supabase import create_client, Client
 
+# Import API routers v1.0.4
+try:
+    from api import invitations_api, auth_api, auth_2fa_api
+    V1_0_4_ROUTERS_AVAILABLE = True
+except ImportError as e:
+    logging.warning(f"v1.0.4 routers not available: {e}")
+    V1_0_4_ROUTERS_AVAILABLE = False
+
+# Import API routers v1.0.5
+try:
+    from api import transcribe_api
+    V1_0_5_ROUTERS_AVAILABLE = True
+except ImportError as e:
+    logging.warning(f"v1.0.5 routers not available: {e}")
+    V1_0_5_ROUTERS_AVAILABLE = False
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -44,10 +60,28 @@ def get_supabase_client():
 app = FastAPI(
     title="Sales Angel Buddy API",
     description="Enterprise-grade AI-powered sales co-pilot platform with multi-tenant knowledge management",
-    version="1.0.0",
+    version="1.0.4",
     docs_url="/docs" if os.getenv("ENVIRONMENT") == "development" else None,
     redoc_url="/redoc" if os.getenv("ENVIRONMENT") == "development" else None,
 )
+
+# Register v1.0.4 API routers
+if V1_0_4_ROUTERS_AVAILABLE:
+    try:
+        app.include_router(invitations_api.router)
+        app.include_router(auth_api.router)
+        app.include_router(auth_2fa_api.router)
+        logger.info("✅ v1.0.4 authentication routers registered successfully")
+    except Exception as e:
+        logger.error(f"Failed to register v1.0.4 routers: {e}")
+
+# Register v1.0.5 API routers
+if V1_0_5_ROUTERS_AVAILABLE:
+    try:
+        app.include_router(transcribe_api.router)
+        logger.info("✅ v1.0.5 transcribe router registered successfully")
+    except Exception as e:
+        logger.error(f"Failed to register v1.0.5 router: {e}")
 
 # Configure CORS properly - allow env override
 ALLOWED_ORIGINS = [origin.strip() for origin in os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:3005").split(",")]

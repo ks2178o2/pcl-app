@@ -1,0 +1,44 @@
+COVERAGE METRICS COMPARISON
+===========================
+
+When I measure with ALL files (api, middleware, services):
+- TOTAL: 2410 lines
+- Coverage: 19.59% 
+- INCLUDES: 0% coverage files (api/, middleware/)
+
+When I measure with services/ ONLY:
+- TOTAL: 1280 lines  
+- Coverage: 36.77%
+- EXCLUDES: untested files
+
+Breakdown:
+==========
+services/context_manager.py             95.93% ✅
+services/audit_service.py                 82.67% ✅
+services/enhanced_context_manager.py      25.86% 🟡
+services/tenant_isolation_service.py     18.32% 🟡
+services/supabase_client.py              35.63% 🟡
+services/feature_inheritance_service.py    0.00% 🔴
+------------------------------------------------------------------
+subtotal services: ~1130 lines | ~36.77% avg
+
+api/enhanced_context_api.py               0.00% 🔴
+api/organization_hierarchy_api.py         0.00% 🔴
+api/organization_toggles_api.py           0.00% 🔴
+api/rag_features_api.py                   0.00% 🔴
+------------------------------------------------------------------
+subtotal api: ~750 lines | 0.00%
+
+middleware/permissions.py                 0.00% 🔴
+middleware/validation.py                  0.00% 🔴
+------------------------------------------------------------------
+subtotal middleware: ~378 lines | 0.00%
+
+TOTAL: ~2260 lines | ~19.59% overall
+
+THE DROP FROM 20.75% TO 19.59%:
+================================
+- Real: We added more tests, but API/middleware have 0%
+- As we add API/middleware tests, overall % will go UP
+- Context Manager: 95.93% is REAL and verified
+- The "drop" is because more untested code is now in the scope

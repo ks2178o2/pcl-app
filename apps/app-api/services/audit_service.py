@@ -65,6 +65,10 @@ class AuditService:
             
             result = query.execute()
             
+            # Ensure result.data is a list
+            if not isinstance(result.data, list):
+                result.data = []
+            
             # Get total count
             count_query = self.supabase.from_('audit_logs').select('id', count='exact')
             count_query = count_query.eq('organization_id', organization_id)
@@ -76,11 +80,14 @@ class AuditService:
             count_result = count_query.execute()
             total_count = count_result.count if hasattr(count_result, 'count') and count_result.count is not None else 0
             
+            # Ensure logs is a list
+            logs_list = result.data if isinstance(result.data, list) else []
+            
             return {
                 "success": True,
-                "logs": result.data or [],
+                "logs": logs_list,
                 "total_count": total_count,
-                "has_more": offset + len(result.data or []) < total_count if isinstance(total_count, int) else False
+                "has_more": offset + len(logs_list) < total_count if isinstance(total_count, int) else False
             }
             
         except Exception as e:

@@ -7,6 +7,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useAppointments } from '@/hooks/useAppointments';
+import { useProfile } from '@/hooks/useProfile';
 import { format, isToday, isTomorrow, isThisWeek } from 'date-fns';
 
 interface CustomerNameInputProps {
@@ -18,19 +19,38 @@ export const CustomerNameInput: React.FC<CustomerNameInputProps> = ({ value, onC
   const [open, setOpen] = useState(false);
   const [useDropdown, setUseDropdown] = useState(true);
   const { appointments } = useAppointments();
+  const { profile } = useProfile();
 
   const formatAppointmentTime = (dateStr: string) => {
     const date = new Date(dateStr);
-    const time = format(date, 'h:mm a');
+    // Use user's timezone if available, otherwise default to Pacific time
+    const displayTimezone = profile?.timezone || 'America/Los_Angeles';
     
-    if (isToday(date)) {
+    // Format time in user's timezone
+    const time = date.toLocaleTimeString('en-US', {
+      hour: 'numeric',
+      minute: '2-digit',
+      timeZone: displayTimezone
+    });
+    
+    // Format date in user's timezone for comparison
+    const dateInTZ = new Date(date.toLocaleString('en-US', { timeZone: displayTimezone }));
+    const today = new Date();
+    const todayInTZ = new Date(today.toLocaleString('en-US', { timeZone: displayTimezone }));
+    
+    if (dateInTZ.toDateString() === todayInTZ.toDateString()) {
       return `Today at ${time}`;
-    } else if (isTomorrow(date)) {
-      return `Tomorrow at ${time}`;
-    } else if (isThisWeek(date)) {
-      return `${format(date, 'EEEE')} at ${time}`;
     } else {
-      return `${format(date, 'MMM d')} at ${time}`;
+      const tomorrow = new Date(todayInTZ);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      if (dateInTZ.toDateString() === tomorrow.toDateString()) {
+        return `Tomorrow at ${time}`;
+      } else {
+        // Use date-fns format but with timezone-aware date
+        const dayName = dateInTZ.toLocaleDateString('en-US', { weekday: 'long', timeZone: displayTimezone });
+        const dateStr = dateInTZ.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: displayTimezone });
+        return `${dayName} at ${time}`;
+      }
     }
   };
 

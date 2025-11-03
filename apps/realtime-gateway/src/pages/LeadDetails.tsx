@@ -308,7 +308,7 @@ const LeadDetails = () => {
           </div>
           <Button 
             onClick={handleRegeneratePlan}
-            className="bg-blue-600 hover:bg-blue-700 w-full max-w-[480px] md:w-auto"
+            className="w-full max-w-[480px] md:w-auto"
           >
             <Play className="h-4 w-4 mr-2" />
             Start Automated Follow-Up
