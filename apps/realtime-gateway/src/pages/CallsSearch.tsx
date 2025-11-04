@@ -46,8 +46,51 @@ export const CallsSearch: React.FC = () => {
   const [maxDuration, setMaxDuration] = useState('');
   const [selectedCenter, setSelectedCenter] = useState('all');
 
+  // Restore filters and cached calls on mount
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem('searchFilters');
+      if (raw) {
+        const f = JSON.parse(raw);
+        if (typeof f.searchTerm === 'string') setSearchTerm(f.searchTerm);
+        if (typeof f.dateFrom === 'string') setDateFrom(f.dateFrom);
+        if (typeof f.dateTo === 'string') setDateTo(f.dateTo);
+        if (typeof f.sortBy === 'string') setSortBy(f.sortBy);
+        if (typeof f.sortOrder === 'string') setSortOrder(f.sortOrder);
+        if (typeof f.minDuration === 'string') setMinDuration(f.minDuration);
+        if (typeof f.maxDuration === 'string') setMaxDuration(f.maxDuration);
+        if (typeof f.selectedCenter === 'string') setSelectedCenter(f.selectedCenter);
+      }
+      const cached = user ? sessionStorage.getItem(`searchCalls:${user.id}`) : null;
+      if (cached) {
+        const list = JSON.parse(cached) as CallRecord[];
+        setCalls(list);
+        setLoading(false);
+      }
+      const savedScroll = sessionStorage.getItem('searchScrollTop');
+      if (savedScroll) {
+        requestAnimationFrame(() => {
+          try { window.scrollTo(0, parseInt(savedScroll, 10) || 0); } catch {}
+        });
+      }
+    } catch {}
+  }, [user]);
+
+  // Persist filters and scroll
+  useEffect(() => {
+    try {
+      sessionStorage.setItem('searchFilters', JSON.stringify({
+        searchTerm, dateFrom, dateTo, sortBy, sortOrder, minDuration, maxDuration, selectedCenter
+      }));
+      const onScroll = () => sessionStorage.setItem('searchScrollTop', String(window.scrollY || 0));
+      window.addEventListener('scroll', onScroll);
+      return () => window.removeEventListener('scroll', onScroll);
+    } catch {}
+  }, [searchTerm, dateFrom, dateTo, sortBy, sortOrder, minDuration, maxDuration, selectedCenter]);
+
   useEffect(() => {
     if (user) {
+      // If we already warmed from cache, refresh in background without flicker
       loadCalls();
     }
   }, [user]);
@@ -74,6 +117,7 @@ export const CallsSearch: React.FC = () => {
 
       console.log('✅ Loaded', data.length, 'calls for search');
       setCalls(data);
+      try { sessionStorage.setItem(`searchCalls:${user.id}`, JSON.stringify(data)); } catch {}
     } catch (error) {
       console.error('❌ Error loading calls for search:', error);
     } finally {
@@ -222,55 +266,26 @@ export const CallsSearch: React.FC = () => {
         return;
       }
       
-      // Fetch the audio file and convert to base64
-      const response = await fetch(signedUrlData.signedUrl);
-      if (!response.ok) {
-        throw new Error('Failed to fetch audio file');
+      // Call FastAPI to transcribe this call by ID (backend fetches audio internally)
+      const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8001';
+      const { data: sess } = await supabase.auth.getSession();
+      const token = sess.session?.access_token;
+      const resp = await fetch(`${API_BASE_URL}/api/transcribe/call-record/${encodeURIComponent(call.id)}?enable_diarization=true`, {
+        method: 'POST',
+        headers: {
+          'Authorization': token ? `Bearer ${token}` : '',
+        },
+      });
+      const data = await resp.json().catch(() => null);
+      if (!resp.ok) {
+        console.error('Transcription failed:', data);
+        alert('Transcription failed. Please check the console for details.');
+      } else {
+        console.log('Transcription retry successful:', data);
+        setTimeout(() => {
+          window.location.reload();
+        }, 2000);
       }
-      
-      const audioBlob = await response.blob();
-      console.log('Audio blob size:', audioBlob.size);
-      
-      const reader = new FileReader();
-      
-      reader.onloadend = async () => {
-        try {
-          const base64Data = reader.result as string;
-          const base64Audio = base64Data.split(',')[1]; // Remove data URL prefix
-          
-          console.log('Base64 audio length:', base64Audio.length);
-
-          const { buildTranscriptionPayload } = await import('@/utils/transcriptionUtils');
-          
-          const payload = await buildTranscriptionPayload({
-            audioBase64: base64Audio,
-            callId: call.id,
-            salespersonName: 'You',
-            customerName: call.customer_name,
-            organizationId: (user as any)?.organization_id,
-          });
-
-          // Call the transcription service
-          const { data, error } = await supabase.functions.invoke('transcribe-audio-v2', {
-            body: payload,
-          });
-
-          if (error) {
-            console.error('Transcription failed:', error);
-            alert('Transcription failed. Please check the console for details.');
-          } else {
-            console.log('Transcription retry successful:', data);
-            // Auto-refresh the page to show updated transcription
-            setTimeout(() => {
-              window.location.reload();
-            }, 2000);
-          }
-        } catch (innerError) {
-          console.error('Error in transcription inner try block:', innerError);
-        }
-      };
-
-      reader.readAsDataURL(audioBlob);
     } catch (error) {
       console.error('Error retrying transcription:', error);
     }

@@ -38,6 +38,15 @@ except ImportError as e:
     logging.warning(f"analysis router not available: {e}")
     ANALYSIS_ROUTER_AVAILABLE = False
 
+# Follow-up API router
+try:
+from api import followup_api
+from api import twilio_api
+    FOLLOWUP_ROUTER_AVAILABLE = True
+except ImportError as e:
+    logging.warning(f"followup router not available: {e}")
+    FOLLOWUP_ROUTER_AVAILABLE = False
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -98,6 +107,15 @@ if ANALYSIS_ROUTER_AVAILABLE:
         logger.info("✅ analysis router registered successfully")
     except Exception as e:
         logger.error(f"Failed to register analysis router: {e}")
+
+# Register follow-up router
+if FOLLOWUP_ROUTER_AVAILABLE:
+    try:
+app.include_router(followup_api.router)
+app.include_router(twilio_api.router)
+        logger.info("✅ followup router registered successfully")
+    except Exception as e:
+        logger.error(f"Failed to register followup router: {e}")
 
 # Configure CORS properly - allow env override
 ALLOWED_ORIGINS = [origin.strip() for origin in os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:3005").split(",")]

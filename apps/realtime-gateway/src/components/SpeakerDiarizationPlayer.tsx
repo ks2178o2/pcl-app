@@ -38,6 +38,8 @@ interface SpeakerDiarizationPlayerProps {
   speakerMapping?: Record<string, string>;
   duration: number;
   onTimeUpdate?: (currentTime: number) => void;
+  // Optional key to persist/restore UI state across navigations
+  persistKey?: string;
 }
 
 export const SpeakerDiarizationPlayer: React.FC<SpeakerDiarizationPlayerProps> = ({
@@ -46,11 +48,13 @@ export const SpeakerDiarizationPlayer: React.FC<SpeakerDiarizationPlayerProps> =
   diarizationSegments,
   speakerMapping,
   duration,
-  onTimeUpdate
+  onTimeUpdate,
+  persistKey
 }) => {
   const audioRef = useRef<HTMLAudioElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const progressRef = useRef<HTMLDivElement>(null);
+  const scrollViewportRef = useRef<HTMLDivElement>(null);
   
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -58,7 +62,8 @@ export const SpeakerDiarizationPlayer: React.FC<SpeakerDiarizationPlayerProps> =
   const [volume, setVolume] = useState(100);
   const [speakerTracks, setSpeakerTracks] = useState<SpeakerTrack[]>([]);
   const [activeSegment, setActiveSegment] = useState<string | null>(null);
-  const [visibleRange, setVisibleRange] = useState({ start: 0, end: 50 }); // Show 50 segments at a time
+  // Increase initial visible range to show more segments initially
+  const [visibleRange, setVisibleRange] = useState({ start: 0, end: 300 }); // Show 300 segments initially
 
   // Speaker colors for visualization
   const speakerColors = [
@@ -415,23 +420,85 @@ export const SpeakerDiarizationPlayer: React.FC<SpeakerDiarizationPlayerProps> =
     return allSegments.sort((a, b) => a.startTime - b.startTime);
   }, [speakerTracks]);
 
+  // Restore persisted UI state (time and visible range) if available
+  useEffect(() => {
+    if (!persistKey) return;
+    try {
+      const raw = sessionStorage.getItem(`player:${persistKey}`);
+      if (raw) {
+        const { time, start } = JSON.parse(raw);
+        if (typeof start === 'number') {
+          const end = Math.max(start + 300, 300);
+          setVisibleRange({ start: Math.max(0, start), end });
+        }
+        if (typeof time === 'number' && audioRef.current) {
+          audioRef.current.currentTime = Math.max(0, Math.min(time, duration || time));
+        }
+      }
+    } catch {}
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [persistKey]);
+
   // Render only visible segments for performance
   const visibleSegments = useMemo(() => {
     return sortedSegments.slice(visibleRange.start, visibleRange.end);
   }, [sortedSegments, visibleRange]);
 
-  // Update visible range on scroll
+  // Update visible range on scroll - ensure we load more segments as user scrolls
   const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
     const target = e.currentTarget;
     const scrollTop = target.scrollTop;
+    const scrollHeight = target.scrollHeight;
+    const clientHeight = target.clientHeight;
     const itemHeight = 130; // Approximate height per segment
-    const visibleCount = Math.ceil(target.clientHeight / itemHeight);
-    const bufferCount = 10; // Extra items to render above/below viewport
     
+    // Calculate how many items are visible
+    const visibleCount = Math.ceil(clientHeight / itemHeight);
+    const bufferCount = 30; // Extra items to render above/below viewport (increased for smoother scrolling)
+    
+    // Calculate which segment range should be visible
     const start = Math.max(0, Math.floor(scrollTop / itemHeight) - bufferCount);
     const end = Math.min(sortedSegments.length, start + visibleCount + bufferCount * 2);
     
-    setVisibleRange({ start, end });
+    // Only update if the range actually changed (to avoid unnecessary re-renders)
+    setVisibleRange(prev => {
+      if (prev.start !== start || prev.end !== end) {
+        return { start, end };
+      }
+      return prev;
+    });
+    // Persist scroll window
+    if (persistKey) {
+      try {
+        const raw = sessionStorage.getItem(`player:${persistKey}`);
+        const prevState = raw ? JSON.parse(raw) : {};
+        sessionStorage.setItem(`player:${persistKey}`, JSON.stringify({ ...prevState, start }));
+      } catch {}
+    }
+  }, [sortedSegments.length]);
+
+  // Attach scroll listener to viewport element (for Radix ScrollArea)
+  useEffect(() => {
+    const viewport = scrollViewportRef.current?.querySelector('[data-radix-scroll-area-viewport]') as HTMLElement;
+    if (viewport) {
+      viewport.addEventListener('scroll', handleScroll as any);
+      return () => {
+        viewport.removeEventListener('scroll', handleScroll as any);
+      };
+    }
+  }, [handleScroll]);
+
+  // Initialize visible range to show all segments if there aren't too many, or first batch if many
+  useEffect(() => {
+    if (sortedSegments.length > 0) {
+      // If we have fewer than 500 segments, show all of them (better UX for most calls)
+      if (sortedSegments.length <= 500) {
+        setVisibleRange({ start: 0, end: sortedSegments.length });
+      } else {
+        // For very long calls, start with first 300 segments
+        setVisibleRange({ start: 0, end: 300 });
+      }
+    }
   }, [sortedSegments.length]);
 
   return (
@@ -569,10 +636,22 @@ export const SpeakerDiarizationPlayer: React.FC<SpeakerDiarizationPlayerProps> =
               </div>
             </div>
           ) : (
-            <ScrollArea className="h-[400px]" onScroll={handleScroll}>
-              <div className="space-y-3 pr-4" style={{ minHeight: `${sortedSegments.length * 130}px` }}>
-                <div style={{ paddingTop: `${visibleRange.start * 130}px` }}>
-                  {visibleSegments.map((segment) => {
+            <div className="space-y-2">
+              {sortedSegments.length > 500 && visibleRange.end < sortedSegments.length && (
+                <div className="text-xs text-muted-foreground text-center py-2 bg-muted/50 rounded p-2">
+                  Showing {visibleRange.start + 1}-{visibleRange.end} of {sortedSegments.length.toLocaleString()} segments. Scroll to load more.
+                </div>
+              )}
+              <div ref={scrollViewportRef}>
+                <ScrollArea 
+                  className="h-[400px]"
+                >
+                  <div 
+                    className="space-y-3 pr-4" 
+                    style={{ minHeight: `${sortedSegments.length * 130}px` }}
+                  >
+                  <div style={{ paddingTop: `${visibleRange.start * 130}px` }}>
+                    {visibleSegments.map((segment) => {
                     const track = speakerTracks.find(t => t.speaker === segment.trackSpeaker);
                     if (!track) return null;
 
@@ -616,9 +695,15 @@ export const SpeakerDiarizationPlayer: React.FC<SpeakerDiarizationPlayerProps> =
                       </div>
                     );
                   })}
+                  </div>
+                  {/* Spacer at the end to maintain scroll height */}
+                  {visibleRange.end < sortedSegments.length && (
+                    <div style={{ height: `${(sortedSegments.length - visibleRange.end) * 130}px` }} />
+                  )}
                 </div>
+              </ScrollArea>
               </div>
-            </ScrollArea>
+            </div>
           )}
         </CardContent>
       </Card>

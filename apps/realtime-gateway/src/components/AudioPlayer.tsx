@@ -32,6 +32,8 @@ interface AudioPlayerProps {
   onClose: () => void;
   onRetryTranscription?: (call: CallRecord) => void;
   onUpdateSpeakerMapping?: (callId: string, mapping: Record<string, string>) => void;
+  // Optional key to persist/restore UI state across navigations
+  persistKey?: string;
 }
 
 interface TranscriptSegment {
@@ -41,7 +43,7 @@ interface TranscriptSegment {
   isActive: boolean;
 }
 
-export const AudioPlayer: React.FC<AudioPlayerProps> = ({ call, isOpen, onClose, onRetryTranscription, onUpdateSpeakerMapping }) => {
+export const AudioPlayer: React.FC<AudioPlayerProps> = ({ call, isOpen, onClose, onRetryTranscription, onUpdateSpeakerMapping, persistKey }) => {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -54,6 +56,20 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({ call, isOpen, onClose,
   const [retryingAnalysis, setRetryingAnalysis] = useState(false);
   const [showSpeakerEditor, setShowSpeakerEditor] = useState(false);
   const [displayTranscript, setDisplayTranscript] = useState<string>('');
+
+  // Restore persisted state
+  useEffect(() => {
+    if (!persistKey) return;
+    try {
+      const raw = sessionStorage.getItem(`audioplayer:${persistKey}`);
+      if (raw) {
+        const st = JSON.parse(raw);
+        if (typeof st.time === 'number') setCurrentTime(st.time);
+        if (typeof st.speed === 'string') setPlaybackSpeed(st.speed);
+        if (Array.isArray(st.volume)) setVolume(st.volume);
+      }
+    } catch {}
+  }, [persistKey]);
 
   useEffect(() => {
     if (call?.audioBlob) {
@@ -109,6 +125,18 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({ call, isOpen, onClose,
       audio.removeEventListener('ended', handleEnded);
     };
   }, [audioUrl, call?.duration]);
+
+  // Persist on changes
+  useEffect(() => {
+    if (!persistKey) return;
+    try {
+      sessionStorage.setItem(`audioplayer:${persistKey}`, JSON.stringify({
+        time: currentTime,
+        speed: playbackSpeed,
+        volume
+      }));
+    } catch {}
+  }, [persistKey, currentTime, playbackSpeed, volume]);
 
   useEffect(() => {
     if (audioRef.current) {

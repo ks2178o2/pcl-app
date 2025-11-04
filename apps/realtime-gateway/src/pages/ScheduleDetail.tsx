@@ -726,13 +726,22 @@ const ScheduleDetail = () => {
                             <div className="flex items-center justify-center size-8 rounded-full bg-blue-100 flex-shrink-0">
                               <Phone className="h-4 w-4 text-blue-600" />
                             </div>
-                            <div>
+                            <div className="flex flex-col gap-1">
                               <p className="text-sm text-gray-900">
-                                {call.transcript || 'Call with patient'}
+                                Call with patient
                               </p>
-                              <p className="text-xs text-gray-600">
-                                {callDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                              </p>
+                              <div className="flex items-center gap-2">
+                                <p className="text-xs text-gray-600">
+                                  {callDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                </p>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => navigate(`/analysis/${call.id}`)}
+                                >
+                                  View Analysis
+                                </Button>
+                              </div>
                             </div>
                           </div>
                         );

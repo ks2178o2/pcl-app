@@ -277,9 +277,11 @@ def _process_transcription_background(
                 continue
             try:
                 if p == 'assemblyai':
-                    transcript_text = _transcribe_with_assemblyai(public_url)
+                    result = _transcribe_with_assemblyai(public_url, enable_diarization=False)
+                    transcript_text = result['transcript']
                 elif p == 'deepgram':
-                    transcript_text = _transcribe_with_deepgram(public_url)
+                    result = _transcribe_with_deepgram(public_url, enable_diarization=False)
+                    transcript_text = result['transcript']
                 else:
                     continue
 
@@ -498,18 +500,25 @@ async def update_org_settings(payload: OrgSettingsPayload, user=Depends(require_
         raise HTTPException(status_code=500, detail='Failed to update org settings')
 
 
-def _transcribe_with_assemblyai(signed_url: str) -> str:
+def _transcribe_with_assemblyai(signed_url: str, enable_diarization: bool = True) -> dict:
+    """
+    Transcribe audio with AssemblyAI, optionally with speaker diarization.
+    Returns dict with 'transcript' and 'diarization_segments' keys.
+    """
     # Accept both env var spellings for convenience
     api_key = os.getenv('ASSEMBLYAI_API_KEY') or os.getenv('ASSEMBLY_AI_API_KEY')
     if not api_key:
         raise RuntimeError('ASSEMBLYAI_API_KEY not set')
 
-    # Create transcript job
+    # Create transcript job with speaker diarization enabled
     headers = {
         'authorization': api_key,
         'content-type': 'application/json',
     }
-    payload = { 'audio_url': signed_url }
+    payload = {
+        'audio_url': signed_url,
+        'speaker_labels': enable_diarization,  # Enable speaker diarization
+    }
     r = requests.post('https://api.assemblyai.com/v2/transcript', json=payload, headers=headers, timeout=30)
     if not r.ok:
         logger.error(f"AssemblyAI create error: {r.status_code} {r.text}")
@@ -519,6 +528,7 @@ def _transcribe_with_assemblyai(signed_url: str) -> str:
         raise RuntimeError('AssemblyAI: missing job id')
 
     # Poll until completed/failed
+    import time
     for _ in range(60):  # up to ~60 * 2s = 2 minutes
         s = requests.get(f'https://api.assemblyai.com/v2/transcript/{job_id}', headers=headers, timeout=15)
         if not s.ok:
@@ -527,16 +537,37 @@ def _transcribe_with_assemblyai(signed_url: str) -> str:
         data = s.json()
         status = data.get('status')
         if status == 'completed':
-            return data.get('text') or ''
+            transcript = data.get('text') or ''
+            
+            # Extract diarization segments if available
+            diarization_segments = []
+            if enable_diarization and data.get('utterances'):
+                for utterance in data.get('utterances', []):
+                    diarization_segments.append({
+                        'speaker': f"Speaker {utterance.get('speaker', 'A')}",
+                        'start': utterance.get('start', 0) / 1000.0,  # Convert ms to seconds
+                        'end': utterance.get('end', 0) / 1000.0,
+                        'text': utterance.get('text', ''),
+                        'confidence': utterance.get('confidence', 0.0)
+                    })
+            
+            return {
+                'transcript': transcript,
+                'diarization_segments': diarization_segments if diarization_segments else None,
+                'num_speakers': len(set(seg.get('speaker') for seg in diarization_segments)) if diarization_segments else None
+            }
         if status == 'error':
             raise RuntimeError(f"AssemblyAI error: {data.get('error')}")
         # sleep 2s
-        import time
         time.sleep(2)
     raise RuntimeError('AssemblyAI timeout')
 
 
-def _transcribe_with_deepgram(signed_url: str) -> str:
+def _transcribe_with_deepgram(signed_url: str, enable_diarization: bool = True) -> dict:
+    """
+    Transcribe audio with Deepgram, optionally with speaker diarization.
+    Returns dict with 'transcript' and 'diarization_segments' keys.
+    """
     api_key = os.getenv('DEEPGRAM_API_KEY')
     if not api_key:
         raise RuntimeError('DEEPGRAM_API_KEY not set')
@@ -546,18 +577,95 @@ def _transcribe_with_deepgram(signed_url: str) -> str:
         'Content-Type': 'application/json'
     }
     payload = { 'url': signed_url }
+    
+    # Build query parameters for diarization
+    params = ['smart_format=true']
+    if enable_diarization:
+        params.append('diarize=true')
+        params.append('punctuate=true')
+    
     preview = signed_url[:80] + ('...' if len(signed_url) > 80 else '')
-    logger.info(f"Deepgram request starting for URL: {preview}")
-    r = requests.post('https://api.deepgram.com/v1/listen?smart_format=true', json=payload, headers=headers, timeout=60)
+    logger.info(f"Deepgram request starting for URL: {preview} (diarization: {enable_diarization})")
+    
+    url = f"https://api.deepgram.com/v1/listen?{'&'.join(params)}"
+    r = requests.post(url, json=payload, headers=headers, timeout=60)
     if not r.ok:
         logger.error(f"Deepgram error: {r.status_code} {r.text}")
         r.raise_for_status()
     data = r.json()
-    # Extract transcript from Deepgram JSON
+    
+    # Extract transcript and diarization segments from Deepgram JSON
     try:
-        return data['results']['channels'][0]['alternatives'][0]['transcript']
-    except Exception:
-        raise RuntimeError('Deepgram: unable to parse transcript')
+        channel = data['results']['channels'][0]
+        alternative = channel['alternatives'][0]
+        transcript = alternative['transcript']
+        
+        diarization_segments = []
+        if enable_diarization and alternative.get('paragraphs'):
+            # Deepgram paragraphs format includes speaker information
+            for para in alternative.get('paragraphs', {}).get('paragraphs', []):
+                speaker = para.get('speaker', 0)
+                start = para.get('start', 0)
+                end = para.get('end', 0)
+                text = para.get('sentences', [{}])[0].get('text', '') if para.get('sentences') else ''
+                
+                diarization_segments.append({
+                    'speaker': f"Speaker {speaker}",
+                    'start': start,
+                    'end': end,
+                    'text': text,
+                    'confidence': para.get('confidence', 0.0)
+                })
+        elif enable_diarization and alternative.get('words'):
+            # Fallback: use words with speaker labels if paragraphs not available
+            current_speaker = None
+            current_start = None
+            current_end = None
+            current_words = []
+            
+            for word in alternative.get('words', []):
+                word_speaker = word.get('speaker', 0)
+                word_start = word.get('start', 0)
+                word_end = word.get('end', 0)
+                word_text = word.get('word', '')
+                
+                if current_speaker is None or word_speaker != current_speaker:
+                    # Save previous segment
+                    if current_speaker is not None and current_words:
+                        diarization_segments.append({
+                            'speaker': f"Speaker {current_speaker}",
+                            'start': current_start,
+                            'end': current_end,
+                            'text': ' '.join(current_words),
+                            'confidence': 0.85  # Default confidence
+                        })
+                    # Start new segment
+                    current_speaker = word_speaker
+                    current_start = word_start
+                    current_end = word_end
+                    current_words = [word_text]
+                else:
+                    current_end = word_end
+                    current_words.append(word_text)
+            
+            # Save last segment
+            if current_speaker is not None and current_words:
+                diarization_segments.append({
+                    'speaker': f"Speaker {current_speaker}",
+                    'start': current_start,
+                    'end': current_end,
+                    'text': ' '.join(current_words),
+                    'confidence': 0.85
+                })
+        
+        return {
+            'transcript': transcript,
+            'diarization_segments': diarization_segments if diarization_segments else None,
+            'num_speakers': len(set(seg.get('speaker') for seg in diarization_segments)) if diarization_segments else None
+        }
+    except Exception as e:
+        logger.error(f"Deepgram parsing error: {e}")
+        raise RuntimeError(f'Deepgram: unable to parse transcript - {str(e)}')
 
 @router.get("/status/{upload_id}", response_model=TranscriptionStatusResponse)
 async def get_transcription_status(
@@ -667,6 +775,243 @@ async def list_transcriptions(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error listing transcriptions: {str(e)}"
         )
+
+
+@router.post("/call-record/{call_record_id}", response_model=dict)
+async def transcribe_call_record(
+    call_record_id: str,
+    background_tasks: BackgroundTasks,
+    provider: Optional[str] = None,
+    enable_diarization: bool = True,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Transcribe a call_record with optional speaker diarization.
+    Updates call_records table with transcript and diarization_segments.
+    """
+    supabase = get_supabase_client()
+    if not supabase:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Storage service unavailable"
+        )
+    
+    try:
+        # Fetch call record
+        call_result = supabase.from_('call_records').select('*').eq('id', call_record_id).single().execute()
+        
+        if not call_result.data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Call record not found"
+            )
+        
+        call_record = call_result.data
+        
+        # Verify ownership
+        if call_record.get('user_id') != current_user['user_id']:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied to this call record"
+            )
+        
+        # Get audio file URL
+        audio_url = call_record.get('audio_file_url')
+        if not audio_url:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No audio file URL found for this call record"
+            )
+        
+        # Determine provider
+        transcription_provider = provider or call_record.get('transcription_provider') or 'deepgram'
+        
+        # Start transcription in background
+        background_tasks.add_task(
+            _transcribe_call_record_background,
+            call_record_id,
+            audio_url,
+            transcription_provider,
+            enable_diarization,
+        )
+        
+        return {
+            'success': True,
+            'message': 'Transcription started',
+            'call_record_id': call_record_id,
+            'provider': transcription_provider,
+            'diarization_enabled': enable_diarization
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error starting transcription: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error starting transcription: {str(e)}"
+        )
+
+
+def _transcribe_call_record_background(
+    call_record_id: str,
+    audio_url: str,
+    provider: str,
+    enable_diarization: bool,
+):
+    """Background task: transcribe audio and update call_records with transcript and diarization."""
+    supabase = get_supabase_client()
+    
+    # Helper to update call_records
+    def _update_call_record(fields: dict):
+        try:
+            result = supabase.from_("call_records").update(fields).eq("id", call_record_id).execute()
+            logger.debug(f"Updated call_records with fields: {list(fields.keys())}")
+            return result
+        except Exception as e:
+            logger.error(f"Failed to update call_records: {e}")
+            raise  # Re-raise so caller knows update failed
+    
+    # Mark as transcribing
+    _update_call_record({"status": "transcribing"})
+    
+    try:
+        # Convert storage path to signed URL if needed
+        # audio_url might be just a path like "folder/file.webm" or already a full URL
+        signed_url = audio_url
+        if not audio_url.startswith('http://') and not audio_url.startswith('https://'):
+            # It's a storage path, create a signed URL
+            try:
+                # Create signed URL valid for 1 hour (same pattern as used elsewhere in codebase)
+                signed = supabase.storage.from_('call-recordings').create_signed_url(audio_url, 3600)
+                signed_url = None
+                
+                # Handle different possible return formats from Supabase Python client
+                if isinstance(signed, dict):
+                    signed_url = (
+                        signed.get('signedUrl') or 
+                        signed.get('signedURL') or 
+                        signed.get('signed_url') or
+                        signed.get('url')
+                    )
+                elif hasattr(signed, 'signedUrl'):
+                    signed_url = getattr(signed, 'signedUrl', None) or getattr(signed, 'signedURL', None)
+                elif isinstance(signed, str):
+                    signed_url = signed
+                
+                if signed_url:
+                    logger.info(f"Created signed URL for storage path: {audio_url[:50]}... -> {signed_url[:80]}...")
+                else:
+                    logger.warning(f"Failed to extract signed URL from response: {signed}")
+                    # Try to construct public URL as fallback
+                    supabase_url = os.getenv('SUPABASE_URL', '')
+                    if supabase_url:
+                        signed_url = f"{supabase_url}/storage/v1/object/public/call-recordings/{audio_url}"
+                        logger.info(f"Using public URL fallback: {signed_url[:80]}...")
+            except Exception as e:
+                logger.error(f"Error creating signed URL for {audio_url}: {e}")
+                # Try to construct public URL as fallback
+                supabase_url = os.getenv('SUPABASE_URL', '')
+                if supabase_url:
+                    signed_url = f"{supabase_url}/storage/v1/object/public/call-recordings/{audio_url}"
+                    logger.info(f"Using public URL fallback: {signed_url[:80]}...")
+        
+        # Determine provider order
+        provider_order = [provider] if provider in ("assemblyai", "deepgram") else ["deepgram", "assemblyai"]
+        
+        last_error = None
+        result = None
+        
+        for p in provider_order:
+            try:
+                if p == 'assemblyai':
+                    result = _transcribe_with_assemblyai(signed_url, enable_diarization=enable_diarization)
+                elif p == 'deepgram':
+                    result = _transcribe_with_deepgram(signed_url, enable_diarization=enable_diarization)
+                else:
+                    continue
+                
+                # Success - update call_records
+                transcript_text = result.get('transcript', '') or ''
+                # Only include fields that exist in the database
+                update_fields = {
+                    "transcript": transcript_text,
+                    "status": "completed",
+                }
+                # Only add transcription_provider if column exists (optional field)
+                # We'll try to add it, but handle errors gracefully
+                
+                # Log diarization info
+                has_segments = bool(result.get('diarization_segments'))
+                segments_count = len(result['diarization_segments']) if has_segments else 0
+                logger.info(f"Transcription result for {call_record_id}: transcript_length={len(transcript_text)}, enable_diarization={enable_diarization}, has_segments={has_segments}, segments_count={segments_count}")
+                logger.info(f"Transcript preview (first 200 chars): {transcript_text[:200]}")
+                
+                if enable_diarization and result.get('diarization_segments'):
+                    update_fields['diarization_segments'] = result['diarization_segments']
+                    # Try to add num_speakers if available, but don't fail if column doesn't exist
+                    if result.get('num_speakers'):
+                        update_fields['num_speakers'] = result['num_speakers']
+                
+                # Save the update (with or without num_speakers)
+                try:
+                    _update_call_record(update_fields)
+                    if enable_diarization and result.get('diarization_segments'):
+                        logger.info(f"✅ Successfully saved transcript (len={len(transcript_text)}) + {segments_count} diarization segments to call_record {call_record_id}")
+                    else:
+                        logger.warning(f"No diarization segments to save for {call_record_id}: enable_diarization={enable_diarization}, has_segments={has_segments}")
+                except Exception as save_error:
+                    # If save failed due to missing columns, retry without them
+                    save_error_str = str(save_error)
+                    save_error_msg = save_error_str.lower()
+                    
+                    # Identify which columns are missing
+                    missing_columns = []
+                    if 'num_speakers' in save_error_msg and 'num_speakers' in update_fields:
+                        missing_columns.append('num_speakers')
+                    if 'transcription_provider' in save_error_msg and 'transcription_provider' in update_fields:
+                        missing_columns.append('transcription_provider')
+                    
+                    if missing_columns:
+                        logger.warning(f"⚠️ Save failed due to missing columns: {missing_columns}, retrying without them: {save_error}")
+                        update_fields_retry = {k: v for k, v in update_fields.items() if k not in missing_columns}
+                        logger.info(f"Retry update fields (keys): {list(update_fields_retry.keys())}, transcript_length={len(update_fields_retry.get('transcript', '') or '')}")
+                        try:
+                            _update_call_record(update_fields_retry)
+                            logger.info(f"✅ Successfully saved transcript (len={len(transcript_text)}) + {segments_count} diarization segments (without {missing_columns}) to call_record {call_record_id}")
+                        except Exception as retry_error:
+                            logger.error(f"❌ Retry save also failed: {retry_error}")
+                            raise  # Re-raise if retry also fails
+                    else:
+                        logger.error(f"❌ Save failed with unknown error: {save_error}")
+                        raise  # Re-raise if it's a different error
+                logger.info(f"Successfully transcribed call_record {call_record_id} with {p}")
+                return
+                
+            except Exception as prov_exc:
+                last_error = str(prov_exc)
+                logger.warning(f"Provider {p} failed: {last_error}")
+                continue
+        
+        # All providers failed
+        try:
+            _update_call_record({
+                "status": "completed",
+                "transcript": "Transcription failed: " + (last_error or "all providers failed")
+            })
+        except Exception as update_err:
+            logger.error(f"Failed to update call_record with failure status: {update_err}")
+        raise RuntimeError(last_error or "all providers failed")
+        
+    except Exception as exc:
+        logger.error(f"Transcription failed for call_record {call_record_id}: {exc}")
+        try:
+            _update_call_record({
+                "status": "completed",
+                "transcript": f"Transcription failed: {str(exc)}"
+            })
+        except Exception as update_err:
+            logger.error(f"Failed to update call_record with error status: {update_err}")
 
 
 @router.delete("/{upload_id}", status_code=status.HTTP_204_NO_CONTENT)

@@ -48,6 +48,7 @@ interface CallAnalysisPanelProps {
   callRecordId?: string;
   customerName?: string;
   onSpeakerMappingUpdate?: (newMapping: Record<string, string>) => void;
+  diarizationStatus?: string;
 }
 
 export const CallAnalysisPanel: React.FC<CallAnalysisPanelProps> = ({
@@ -62,7 +63,8 @@ export const CallAnalysisPanel: React.FC<CallAnalysisPanelProps> = ({
   speakerMapping,
   onSpeakerMappingUpdate,
   callRecordId,
-  customerName
+  customerName,
+  diarizationStatus
 }) => {
   // Debug logging
   console.log('CallAnalysisPanel rendered with callRecordId:', callRecordId);
@@ -70,6 +72,10 @@ export const CallAnalysisPanel: React.FC<CallAnalysisPanelProps> = ({
   const [currentSpeakerMapping, setCurrentSpeakerMapping] = useState<Record<string, string>>(speakerMapping || {});
   const [isSMSSenderOpen, setIsSMSSenderOpen] = useState(false);
   const [isEmailSenderOpen, setIsEmailSenderOpen] = useState(false);
+
+  const safeReplace = (value: any, search: string, replaceWith: string) => {
+    return typeof value === 'string' ? value.replace(search, replaceWith) : (value || '');
+  };
 
   // Sync mapping when prop updates (e.g., after saving)
   React.useEffect(() => {
@@ -122,12 +128,13 @@ export const CallAnalysisPanel: React.FC<CallAnalysisPanelProps> = ({
               )}
             </div>
 
-            <SpeakerDiarizationPlayer
+        <SpeakerDiarizationPlayer
               audioUrl={audioUrl}
               transcript={transcript}
               diarizationSegments={diarizationSegments}
               speakerMapping={currentSpeakerMapping}
               duration={callDuration}
+          persistKey={callRecordId || undefined}
             />
 
             <SpeakerMappingEditor
@@ -143,6 +150,57 @@ export const CallAnalysisPanel: React.FC<CallAnalysisPanelProps> = ({
       </div>
     );
   }
+
+  // If analysis exists but is missing expected nested fields, render a safe fallback
+  const isAnalysisComplete = Boolean(
+    (analysis as any)?.sentiment &&
+    (analysis as any)?.customerPersonality &&
+    (analysis as any)?.urgencyScoring &&
+    (analysis as any)?.salesPerformance &&
+    (analysis as any)?.financialPsychology
+  );
+
+  if (!isAnalysisComplete) {
+    return (
+      <div className="space-y-6">
+        {transcript && !transcript.includes('failed') && transcript !== 'Transcribing audio...' && (
+          <div className="space-y-4 mt-4">
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="font-medium flex items-center gap-2">
+                <PlayCircle className="h-4 w-4" />
+                Transcript
+              </h4>
+            </div>
+            <ScrollArea className="h-64 rounded border p-3 bg-muted/30">
+              <div className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">
+                {transcript}
+              </div>
+            </ScrollArea>
+          </div>
+        )}
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <TrendingUp className="h-5 w-5" />
+              Analysis in progress
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-sm text-muted-foreground">
+              Some analysis sections aren’t available yet. This usually resolves once processing completes.
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  // Safe aliases with defaults to avoid undefined property access
+  const s = analysis.sentiment || { overall: 'neutral', customerEngagement: 0, interestLevel: 0, concerns: [] };
+  const cp = analysis.customerPersonality || { personalityType: 'research-driven', motivationCategory: 'health-driven', communicationStyle: { preferredTone: 'professional', informationDepth: 'detailed', decisionSpeed: 'deliberate' }, psychographics: { riskTolerance: 'moderate', socialInfluence: 'medium', qualityFocus: 'value' }, behavioralIndicators: [], confidence: 0.7 } as any;
+  const us = analysis.urgencyScoring || { overallUrgency: 0, urgencyFactors: { timelinePressure: 0, emotionalState: 0, financialWindow: 0, seasonalFactors: 0, socialPressure: 0 }, buyingSignals: [], delayIndicators: [], urgencyTriggers: [] };
+  const fs = analysis.financialPsychology || { paymentComfort: 'flexible', priceAnchor: 'value-focused', financialDecisionStyle: 'analytical', investmentMindset: 'improvement', budgetRange: 'Not specified', financingInterest: false, valuePerception: 0 } as any;
 
   const getPersonalityColor = (type: string) => {
     const colors = {
@@ -177,13 +235,18 @@ export const CallAnalysisPanel: React.FC<CallAnalysisPanelProps> = ({
         )}
       </div>
 
-      {/* Always show transcript player at top when available */}
-      {audioUrl && transcript && !transcript.includes('failed') && transcript !== 'Transcribing audio...' && (
+      {/* Transcript + Player */}
+      {diarizationStatus && (
+        <div className="text-xs text-muted-foreground border rounded-md p-2 bg-muted/30">
+          {diarizationStatus}
+        </div>
+      )}
+      {transcript && !transcript.includes('failed') && transcript !== 'Transcribing audio...' && (
         <div className="space-y-4 mt-4">
           <div className="flex items-center justify-between mb-3">
             <h4 className="font-medium flex items-center gap-2">
               <PlayCircle className="h-4 w-4" />
-              Interactive Audio & Speaker Transcript
+              Transcript & Speakers
             </h4>
             {diarizationSegments && diarizationSegments.length > 0 && (
               <Button
@@ -197,14 +260,34 @@ export const CallAnalysisPanel: React.FC<CallAnalysisPanelProps> = ({
               </Button>
             )}
           </div>
-
-          <SpeakerDiarizationPlayer
-            audioUrl={audioUrl}
-            transcript={transcript}
-            diarizationSegments={diarizationSegments}
-            speakerMapping={currentSpeakerMapping}
-            duration={callDuration}
-          />
+          {(audioUrl && diarizationSegments && diarizationSegments.length > 0) ? (
+            <SpeakerDiarizationPlayer
+              audioUrl={audioUrl}
+              transcript={transcript}
+              diarizationSegments={diarizationSegments}
+              speakerMapping={currentSpeakerMapping}
+              duration={callDuration}
+            />
+          ) : (
+            <ScrollArea className="h-64 rounded border p-3 bg-muted/30">
+              <div className="space-y-2 text-sm">
+                {(function() {
+                  if (diarizationSegments && diarizationSegments.length > 0 && currentSpeakerMapping) {
+                    try {
+                      const { generateMappedTranscript } = require('@/utils/speakerUtils');
+                      const mapped = generateMappedTranscript(diarizationSegments, currentSpeakerMapping);
+                      return mapped.split('\n').map((line: string, idx: number) => (
+                        <div key={idx}>{line}</div>
+                      ));
+                    } catch {
+                      return transcript.split('\n').map((line, idx) => (<div key={idx}>{line}</div>));
+                    }
+                  }
+                  return transcript.split('\n').map((line, idx) => (<div key={idx}>{line}</div>));
+                })()}
+              </div>
+            </ScrollArea>
+          )}
 
           <SpeakerMappingEditor
             isOpen={isSpeakerEditorOpen}
@@ -217,7 +300,16 @@ export const CallAnalysisPanel: React.FC<CallAnalysisPanelProps> = ({
         </div>
       )}
 
-      <Tabs defaultValue="overview" className="w-full">
+      {/* Persist active tab per call id */}
+      <Tabs 
+        defaultValue={(typeof window !== 'undefined' && callRecordId) ? (sessionStorage.getItem(`analysisTab:${callRecordId}`) || 'overview') : 'overview'} 
+        onValueChange={(val) => {
+          if (typeof window !== 'undefined' && callRecordId) {
+            try { sessionStorage.setItem(`analysisTab:${callRecordId}`, val); } catch {}
+          }
+        }}
+        className="w-full"
+      >
         <TabsList className="grid w-full grid-cols-6">
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="transcript">Transcript</TabsTrigger>
@@ -249,14 +341,14 @@ export const CallAnalysisPanel: React.FC<CallAnalysisPanelProps> = ({
                   <div className="grid grid-cols-2 gap-4">
                     <div className="flex items-center justify-between">
                       <span className="text-sm">Personality Type:</span>
-                      <Badge className={getPersonalityColor(analysis.customerPersonality.personalityType)}>
-                        {analysis.customerPersonality.personalityType.replace('-', ' ')}
+                      <Badge className={getPersonalityColor(analysis.customerPersonality?.personalityType || '')}>
+                        {safeReplace(analysis.customerPersonality?.personalityType, '-', ' ')}
                       </Badge>
                     </div>
                     <div className="flex items-center justify-between">
                       <span className="text-sm">Motivation:</span>
                       <Badge variant="outline">
-                        {analysis.customerPersonality.motivationCategory.replace('-', ' ')}
+                        {safeReplace(analysis.customerPersonality?.motivationCategory, '-', ' ')}
                       </Badge>
                     </div>
                   </div>
@@ -292,30 +384,30 @@ export const CallAnalysisPanel: React.FC<CallAnalysisPanelProps> = ({
               {/* Sentiment Analysis */}
               <div>
                 <h4 className="font-medium mb-3 flex items-center gap-2">
-                  {transcriptAnalysisService.getSentimentIcon(analysis.sentiment.overall)}
+                  {transcriptAnalysisService.getSentimentIcon(s.overall as any)}
                   Sentiment Analysis
                 </h4>
                 <div className="grid grid-cols-3 gap-3 text-sm">
                   <div className="text-center p-2 bg-muted rounded-lg">
                     <div className="font-medium">Overall</div>
-                    <div className={`capitalize ${transcriptAnalysisService.getSentimentColor(analysis.sentiment.overall)}`}>
-                      {analysis.sentiment.overall}
+                    <div className={`capitalize ${transcriptAnalysisService.getSentimentColor((s.overall as any) || 'neutral')}`}>
+                      {s.overall}
                     </div>
                   </div>
                   <div className="text-center p-2 bg-muted rounded-lg">
                     <div className="font-medium">Engagement</div>
-                    <div className="text-lg">{analysis.sentiment.customerEngagement}/10</div>
+                    <div className="text-lg">{s.customerEngagement}/10</div>
                   </div>
                   <div className="text-center p-2 bg-muted rounded-lg">
                     <div className="font-medium">Interest</div>
-                    <div className="text-lg">{analysis.sentiment.interestLevel}/10</div>
+                    <div className="text-lg">{s.interestLevel}/10</div>
                   </div>
                 </div>
-                {analysis.sentiment.concerns.length > 0 && (
+                {(s.concerns || []).length > 0 && (
                   <div className="mt-3">
                     <div className="font-medium text-sm mb-2">Key Concerns:</div>
                     <div className="flex flex-wrap gap-1">
-                      {analysis.sentiment.concerns.map((concern, index) => (
+                      {s.concerns.map((concern, index) => (
                         <Badge key={index} variant="outline" className="text-xs">
                           {concern}
                         </Badge>
@@ -342,7 +434,7 @@ export const CallAnalysisPanel: React.FC<CallAnalysisPanelProps> = ({
                         <div key={index} className="border rounded-lg p-3 text-sm">
                           <div className="flex items-center justify-between mb-1">
                             <Badge className={transcriptAnalysisService.getObjectionTypeColor(objection.type)}>
-                              {objection.type.replace('-', ' ')}
+                              {safeReplace(objection.type, '-', ' ')}
                             </Badge>
                             <span className="text-xs text-muted-foreground">
                               {Math.round(objection.confidence * 100)}%
@@ -493,7 +585,7 @@ export const CallAnalysisPanel: React.FC<CallAnalysisPanelProps> = ({
                     </div>
                     <div className="p-3 border rounded-lg text-center">
                       <div className="font-medium text-sm mb-1">Price Focus</div>
-                      <Badge variant="outline">{analysis.financialPsychology.priceAnchor.replace('-', ' ')}</Badge>
+                      <Badge variant="outline">{safeReplace(analysis.financialPsychology?.priceAnchor, '-', ' ')}</Badge>
                     </div>
                     <div className="p-3 border rounded-lg text-center">
                       <div className="font-medium text-sm mb-1">Decision Style</div>
@@ -823,87 +915,14 @@ export const CallAnalysisPanel: React.FC<CallAnalysisPanelProps> = ({
               analysisData={analysis}
             />
             
+            {/* Transcript Tab Content - Text Transcript Only */}
             <div className="space-y-4">
-            {/* Enhanced Speaker Diarization Player */}
-            {((diarizationSegments && diarizationSegments.length > 0) || audioUrl) && transcript && !transcript.includes('failed') && transcript !== 'Transcribing audio...' ? (
-              <div>
-                <div className="flex items-center justify-between mb-3">
-                  <h4 className="font-medium flex items-center gap-2">
-                    <PlayCircle className="h-4 w-4" />
-                    Interactive Audio & Speaker Transcript
-                  </h4>
-                  {diarizationSegments && diarizationSegments.length > 0 && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setIsSpeakerEditorOpen(true)}
-                      className="flex items-center gap-2"
-                    >
-                      <Settings className="h-4 w-4" />
-                      Edit Speakers
-                    </Button>
-                  )}
-                </div>
-                
-                <SpeakerDiarizationPlayer
-                  audioUrl={audioUrl}
-                  transcript={transcript}
-                  diarizationSegments={diarizationSegments}
-                  speakerMapping={currentSpeakerMapping}
-                  duration={callDuration}
-                />
+              <h4 className="font-medium mb-1 flex items-center gap-2">
+                <MessageSquare className="h-4 w-4" />
+                Full Transcript
+              </h4>
 
-                <SpeakerMappingEditor
-                  isOpen={isSpeakerEditorOpen}
-                  onClose={() => setIsSpeakerEditorOpen(false)}
-                  speakerMapping={currentSpeakerMapping}
-                  onSave={handleSpeakerMappingSave}
-                  diarizationSegments={diarizationSegments || []}
-                  confidence={diarizationSegments?.[0]?.confidence || 0.85}
-                />
-                
-                {/* Transcript Management */}
-                {onRegenerateTranscript && (
-                  <div className="mt-4 p-3 border rounded-lg bg-muted/30">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm text-muted-foreground">
-                        Transcript quality issues? Regenerate for better accuracy.
-                      </span>
-                      <Button
-                        onClick={onRegenerateTranscript}
-                        disabled={!!regeneratingTranscript}
-                        variant="outline"
-                        size="sm"
-                        className="flex items-center gap-2"
-                      >
-                        <RefreshCw className={`h-4 w-4 ${regeneratingTranscript ? 'animate-spin' : ''}`} />
-                        {regeneratingTranscript ? 'Regenerating...' : 'Regenerate'}
-                      </Button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <>
-                <h4 className="font-medium mb-1 flex items-center gap-2">
-                  <MessageSquare className="h-4 w-4" />
-                  Full Transcript
-                </h4>
-
-                {/* Basic Audio Player (fallback) */}
-                {audioUrl && (
-                  <div className="rounded-lg border p-3">
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                        <PlayCircle className="h-4 w-4" />
-                        Replay conversation
-                      </div>
-                    </div>
-                    <audio controls src={audioUrl} className="w-full" preload="none" />
-                  </div>
-                )}
-
-                {!transcript || transcript === 'Transcribing audio...' ? (
+              {!transcript || transcript === 'Transcribing audio...' ? (
                   <div className="space-y-3">
                     <p className="text-sm text-muted-foreground">Transcript not available yet.</p>
                     {onRegenerateTranscript && (
@@ -983,8 +1002,6 @@ export const CallAnalysisPanel: React.FC<CallAnalysisPanelProps> = ({
                     })()}
                   </ScrollArea>
                 )}
-              </>
-            )}
             </div>
           </div>
         </TabsContent>

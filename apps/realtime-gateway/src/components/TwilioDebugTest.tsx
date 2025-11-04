@@ -10,16 +10,16 @@ export const TwilioDebugTest: React.FC = () => {
     setTesting(true);
     setResult(null);
     try {
-      const {
-        data,
-        error
-      } = await supabase.functions.invoke('debug-sms');
-      if (error) {
-        setResult({
-          success: false,
-          message: `Error: ${error.message}`,
-          data: null
-        });
+      const { data: { session } } = await supabase.auth.getSession();
+      const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8001';
+      const resp = await fetch(`${API_BASE_URL}/api/twilio/debug`, {
+        headers: {
+          Authorization: session?.access_token ? `Bearer ${session.access_token}` : ''
+        }
+      });
+      const data = await resp.json().catch(() => null);
+      if (!resp.ok) {
+        setResult({ success: false, message: data?.detail || resp.statusText, data: null });
       } else {
         setResult(data);
       }

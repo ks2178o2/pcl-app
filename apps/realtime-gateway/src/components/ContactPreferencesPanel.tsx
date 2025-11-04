@@ -33,6 +33,18 @@ export const ContactPreferencesPanel: React.FC<ContactPreferencesPanelProps> = (
     notes: ''
   });
 
+  // Restore draft from session cache
+  useEffect(() => {
+    try {
+      const key = `contactPrefsDraft:${callRecordId}`;
+      const cached = sessionStorage.getItem(key);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        setFormData((prev) => ({ ...prev, ...parsed }));
+      }
+    } catch {}
+  }, [callRecordId]);
+
   useEffect(() => {
     if (preferences) {
       setFormData({
@@ -63,11 +75,16 @@ export const ContactPreferencesPanel: React.FC<ContactPreferencesPanelProps> = (
         title: "Success",
         description: "Contact preferences saved successfully",
       });
+      try { sessionStorage.removeItem(`contactPrefsDraft:${callRecordId}`); } catch {}
     }
   };
 
   const updateField = (field: string, value: any) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
+    setFormData(prev => {
+      const next: any = { ...prev, [field]: value };
+      try { sessionStorage.setItem(`contactPrefsDraft:${callRecordId}`, JSON.stringify(next)); } catch {}
+      return next;
+    });
   };
 
   if (loading) {
