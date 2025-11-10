@@ -508,15 +508,3 @@ async def update_organization_quotas(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-# ==================== HELPER FUNCTIONS ====================
-
-async def get_current_user() -> Dict[str, Any]:
-    """Get current user from authentication (placeholder implementation)"""
-    # This would integrate with your authentication system
-    # For now, return a mock user
-    return {
-        "id": "user-123",
-        "role": "system_admin",
-        "organization_id": "org-123"
-    }

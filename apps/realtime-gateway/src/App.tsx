@@ -27,6 +27,8 @@ import LeadsList from "./pages/LeadsList";
 import LeadDetails from "./pages/LeadDetails";
 import ActivityLog from "./pages/ActivityLog";
 import UserSettings from "./pages/UserSettings";
+import BulkImportPage from "./pages/BulkImport";
+import { CallStatisticsTest } from "./pages/CallStatisticsTest";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -36,7 +38,12 @@ const App = () => (
     <TooltipProvider>
       <Toaster />
       <Sonner />
-      <BrowserRouter>
+      <BrowserRouter
+        future={{
+          v7_startTransition: true,
+          v7_relativeSplatPath: true,
+        }}
+      >
         <RecordingStateProvider>
           <IdleTimeoutProvider>
             <Routes>
@@ -62,6 +69,9 @@ const App = () => (
             <Route path="/security-settings" element={<SecuritySettings />} />
             <Route path="/transcribe" element={<TranscribeManager />} />
             <Route path="/recordings" element={<Recordings />} />
+            <Route path="/bulk-import" element={<BulkImportPage />} />
+            <Route path="/bulk-upload" element={<BulkImportPage />} />
+            <Route path="/call-statistics-test" element={<CallStatisticsTest />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
             </Routes>

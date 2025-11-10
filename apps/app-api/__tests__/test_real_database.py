@@ -6,19 +6,33 @@ from datetime import datetime, timedelta
 import os
 import json
 
-# Set up real environment variables for testing
-# These should be set in your environment or CI/CD pipeline
-# Example: export SUPABASE_URL="your_supabase_url"
-# Example: export SUPABASE_SERVICE_ROLE_KEY="your_service_role_key"
-# Example: export OPENAI_API_KEY="your_openai_api_key"
+# Credentials are automatically loaded from .env.test (preferred) or .env file
+# Tests should use .env.test to point to a test database, not production
 
-# For testing, use environment variables or skip if not available
+# Load test environment variables (prefer .env.test over .env for tests)
+try:
+    from dotenv import load_dotenv
+    from pathlib import Path
+    # Prefer .env.test for tests to use test database credentials
+    env_paths = [
+        Path(__file__).parent.parent / '.env.test',  # Test-specific credentials (preferred)
+        Path(__file__).parent.parent / 'sandbox.env',  # Sandbox credentials
+        Path(__file__).parent.parent / '.env',  # Development credentials (fallback)
+        Path(__file__).parent.parent.parent.parent / '.env.test',  # Root .env.test
+        Path(__file__).parent.parent.parent.parent / '.env',  # Root .env
+    ]
+    for env_path in env_paths:
+        if env_path.exists():
+            load_dotenv(env_path)
+            break
+except ImportError:
+    pass  # dotenv not available, rely on environment
+
+# Skip tests if credentials are not available
 if not os.environ.get('SUPABASE_URL'):
-    pytest.skip("SUPABASE_URL not set - skipping real database tests")
+    pytest.skip("SUPABASE_URL not found in .env.test or .env file - skipping real database tests", allow_module_level=True)
 if not os.environ.get('SUPABASE_SERVICE_ROLE_KEY'):
-    pytest.skip("SUPABASE_SERVICE_ROLE_KEY not set - skipping real database tests")
-if not os.environ.get('OPENAI_API_KEY'):
-    pytest.skip("OPENAI_API_KEY not set - skipping real database tests")
+    pytest.skip("SUPABASE_SERVICE_ROLE_KEY not found in .env.test or .env file - skipping real database tests", allow_module_level=True)
 
 from services.audit_service import AuditService
 from services.context_manager import ContextManager

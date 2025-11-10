@@ -8,7 +8,7 @@ import { AudioControls } from '@/components/AudioControls';
 import { Mic, Square, RefreshCw, CheckCircle, AlertCircle, Clock, Trash2, Play, Pause, Volume2, Upload as UploadIcon } from 'lucide-react';
 import { ChunkedRecordingManager, RecordingProgress, formatDuration } from '@/services/chunkedRecordingService';
 import { useToast } from '@/components/ui/use-toast';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { useProfile } from '@/hooks/useProfile';
 
 interface ChunkedAudioRecorderProps {
@@ -17,6 +17,7 @@ interface ChunkedAudioRecorderProps {
   patientName?: string;
   patientId?: string;
   centerId?: string;
+  autoStart?: boolean;
 }
 
 export const ChunkedAudioRecorder: React.FC<ChunkedAudioRecorderProps> = ({
@@ -24,7 +25,8 @@ export const ChunkedAudioRecorder: React.FC<ChunkedAudioRecorderProps> = ({
   disabled = false,
   patientName,
   patientId,
-  centerId
+  centerId,
+  autoStart = false
 }) => {
   const [progress, setProgress] = useState<RecordingProgress>({
     currentChunk: 0,
@@ -53,13 +55,41 @@ export const ChunkedAudioRecorder: React.FC<ChunkedAudioRecorderProps> = ({
     console.log('🧹 Checking for orphaned media streams on mount');
     
     // Stop any existing media streams that might be lingering
-    navigator.mediaDevices.enumerateDevices().then(() => {
-      // This triggers cleanup of any getUserMedia streams that are still active
+    // Defensive check for test environments where navigator.mediaDevices might not be available
+    if (navigator?.mediaDevices?.enumerateDevices) {
+      try {
+        // Call enumerateDevices directly on mediaDevices to avoid "Illegal invocation" error
+        // The method must be called with the correct 'this' context
+        const result = navigator.mediaDevices.enumerateDevices();
+        if (result && typeof result.then === 'function') {
+          result.then(() => {
+            // This triggers cleanup of any getUserMedia streams that are still active
+            if (recordingManagerRef.current) {
+              recordingManagerRef.current.cleanup(true);
+              console.log('✅ Pre-mount cleanup completed');
+            }
+          }).catch((err: any) => console.warn('Could not enumerate devices:', err));
+        } else {
+          // Result is not a promise, do cleanup immediately
+          if (recordingManagerRef.current) {
+            recordingManagerRef.current.cleanup(true);
+            console.log('✅ Pre-mount cleanup completed');
+          }
+        }
+      } catch (err) {
+        console.warn('Error enumerating devices:', err);
+        // Fall through to cleanup
+        if (recordingManagerRef.current) {
+          recordingManagerRef.current.cleanup(true);
+        }
+      }
+    } else {
+      // In test environments or when mediaDevices is not available, still try cleanup
       if (recordingManagerRef.current) {
         recordingManagerRef.current.cleanup(true);
-        console.log('✅ Pre-mount cleanup completed');
+        console.log('✅ Pre-mount cleanup completed (no mediaDevices available)');
       }
-    }).catch(err => console.warn('Could not enumerate devices:', err));
+    }
 
     // Check for existing recording state and auto-resume
     const existingState = ChunkedRecordingManager.loadState();
@@ -162,6 +192,18 @@ export const ChunkedAudioRecorder: React.FC<ChunkedAudioRecorderProps> = ({
       });
     }
   }, [progress.errorMessage, toast]);
+
+  // Auto-start recording if autoStart prop is true
+  useEffect(() => {
+    if (autoStart && !disabled && patientName?.trim() && !progress.isRecording && !callRecordId) {
+      // Small delay to ensure component is fully mounted
+      const timer = setTimeout(() => {
+        startRecording();
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoStart, disabled, patientName]);
 
   const startRecording = async () => {
     if (!patientName?.trim()) {
@@ -931,9 +973,9 @@ export const ChunkedAudioRecorder: React.FC<ChunkedAudioRecorderProps> = ({
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Finish recording?</DialogTitle>
+              <DialogDescription>Choose what to do with this recording.</DialogDescription>
             </DialogHeader>
             <div className="space-y-3">
-              <p className="text-sm text-muted-foreground">Choose what to do with this recording.</p>
               <div className="flex gap-2">
                 <Button onClick={handleResumeRecording} variant="secondary" className="flex-1">
                   <Play className="h-4 w-4 mr-2" /> Resume recording
@@ -955,6 +997,9 @@ export const ChunkedAudioRecorder: React.FC<ChunkedAudioRecorderProps> = ({
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Resume Previous Recording?</DialogTitle>
+              <DialogDescription>
+                We couldn't automatically resume your recording. Would you like to try again or start fresh?
+              </DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
               <Alert>

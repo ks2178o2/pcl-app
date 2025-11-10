@@ -107,27 +107,34 @@ export const FollowUpPlanPanel: React.FC<FollowUpPlanPanelProps> = ({
     } catch {}
   }, [callId]);
 
+  // Extract stable user ID to prevent unnecessary re-fetches
+  const userId = user?.id;
+
   useEffect(() => {
-    if (user && callId) {
+    if (userId && callId) {
       loadFollowUpPlan();
     }
-  }, [user, callId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId, callId]);
 
   const loadFollowUpPlan = async () => {
+    if (!userId || !callId) return;
+    
     try {
       setIsLoading(true);
       
-      // Load existing follow-up plan
+      // Load existing follow-up plan - use maybeSingle() to avoid 406 errors
       const { data: planData, error: planError } = await supabase
         .from('follow_up_plans')
         .select('*')
         .eq('call_record_id', callId)
-        .eq('user_id', user!.id)
-        .single();
+        .eq('user_id', userId)
+        .maybeSingle();
 
-      // 406 Not Acceptable or PGRST116 (no rows) are expected and non-critical
-      if (planError && planError.code !== 'PGRST116' && (planError as any).status !== 406) {
-        throw planError;
+      // Only log actual errors (not expected "no rows" cases)
+      if (planError && planError.code !== 'PGRST116') {
+        console.error('Error loading follow-up plan:', planError);
+        // Don't throw - just continue without plan data
       }
 
       if (planData) {
@@ -164,10 +171,11 @@ export const FollowUpPlanPanel: React.FC<FollowUpPlanPanelProps> = ({
           .from('follow_up_messages')
           .select('*')
           .eq('follow_up_plan_id', planData.id)
-          .eq('user_id', user!.id);
+          .eq('user_id', userId);
 
         if (messagesError) {
-          throw messagesError;
+          console.error('Error loading follow-up messages:', messagesError);
+          // Don't throw - just continue without messages
         }
 
         // Merge message_data JSONB fields into message objects if individual columns don't exist

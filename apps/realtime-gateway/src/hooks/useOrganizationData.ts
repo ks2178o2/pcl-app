@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from './useAuth';
 
@@ -38,16 +38,43 @@ export const useOrganizationData = () => {
   const [assignments, setAssignments] = useState<UserAssignment[]>([]);
   const [loading, setLoading] = useState(true);
   const { user } = useAuth();
+  const lastUserIdRef = useRef<string | null>(null);
+  const fetchingRef = useRef(false);
+
+  // Extract stable user ID for dependency
+  const userId = user?.id;
 
   useEffect(() => {
-    if (user) {
-      fetchOrganizationData();
+    // Skip if no user
+    if (!userId) {
+      if (regions.length > 0 || centers.length > 0 || assignments.length > 0) {
+        setRegions([]);
+        setCenters([]);
+        setAssignments([]);
+      }
+      lastUserIdRef.current = null;
+      return;
     }
-  }, [user]);
+
+    // Skip if already fetching or if we've already loaded for this user
+    if (fetchingRef.current || (lastUserIdRef.current === userId && !loading)) {
+      return;
+    }
+
+    // Only fetch if user ID changed
+    if (lastUserIdRef.current === userId) {
+      return;
+    }
+
+    fetchOrganizationData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId]);
 
   const fetchOrganizationData = async () => {
-    if (!user) return;
+    if (!user || !userId) return;
     
+    fetchingRef.current = true;
+    lastUserIdRef.current = userId;
     setLoading(true);
     try {
       console.log('Fetching organization data...');
@@ -168,6 +195,7 @@ export const useOrganizationData = () => {
       console.error('Error fetching organization data:', error);
     } finally {
       setLoading(false);
+      fetchingRef.current = false;
     }
   };
 

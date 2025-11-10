@@ -1,0 +1,65 @@
+Using coverage file: coverage_rag.json
+================================================================================
+TEST COVERAGE REPORT BY MODULE
+================================================================================
+
+Overall Coverage: 10.29%
+Total Statements: 5716
+Covered: 588
+Missing: 5128
+
+--------------------------------------------------------------------------------
+SERVICES LAYER
+--------------------------------------------------------------------------------
+Module                                   Coverage     Statements   Status         
+--------------------------------------------------------------------------------
+__init__                                 100.00%     1            ✅ Good         
+audit_logger                               0.00%     13           🔴 Low          
+audit_service                              0.00%     169          🔴 Low          
+bulk_import_service                       71.28%     665          🟡 Partial      
+call_analysis_service                      4.49%     423          🔴 Low          
+context_manager                            0.00%     194          🔴 Low          
+elevenlabs_rvm_service                     0.00%     27           🔴 Low          
+email_service                              0.00%     42           🔴 Low          
+enhanced_context_manager                   0.00%     276          🔴 Low          
+feature_inheritance_service                0.00%     144          🔴 Low          
+supabase_client                           21.62%     74           🔴 Low          
+tenant_isolation_service                   0.00%     274          🔴 Low          
+--------------------------------------------------------------------------------
+Services Total                            22.15%     2302        
+
+--------------------------------------------------------------------------------
+API LAYER
+--------------------------------------------------------------------------------
+Module                                   Coverage     Statements   Status         
+--------------------------------------------------------------------------------
+__init__                                   0.00%     0            🔴 Low          
+analysis_api                               0.00%     32           🔴 Low          
+auth_2fa_api                               0.00%     148          🔴 Low          
+auth_api                                   0.00%     75           🔴 Low          
+bulk_import_api                            0.00%     461          🔴 Low          
+call_center_followup_api                   0.00%     442          🔴 Low          
+enhanced_context_api                       0.00%     178          🔴 Low          
+followup_api                               0.00%     233          🔴 Low          
+invitations_api                            0.00%     190          🔴 Low          
+organization_hierarchy_api                 0.00%     210          🔴 Low          
+organization_toggles_api                   0.00%     187          🔴 Low          
+rag_features_api                           0.00%     181          🔴 Low          
+transcribe_api                            10.96%     602          🔴 Low          
+twilio_api                                 0.00%     50           🔴 Low          
+--------------------------------------------------------------------------------
+API Total                                  2.21%     2989        
+
+--------------------------------------------------------------------------------
+MIDDLEWARE LAYER
+--------------------------------------------------------------------------------
+Module                                   Coverage     Statements   Status         
+--------------------------------------------------------------------------------
+__init__                                   0.00%     0            🔴 Low          
+auth                                      26.67%     45           🔴 Low          
+permissions                                0.00%     203          🔴 Low          
+validation                                 0.00%     177          🔴 Low          
+--------------------------------------------------------------------------------
+Middleware Total                           2.82%     425         
+
+================================================================================

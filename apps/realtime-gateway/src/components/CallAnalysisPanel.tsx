@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, memo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -38,6 +38,11 @@ import { applyingSpeakerMapping } from '@/utils/speakerUtils';
 interface CallAnalysisPanelProps {
   analysis: CallAnalysis | null;
   isLoading: boolean;
+  analysisStatus?: {
+    stage: 'waiting-transcript' | 'analyzing' | 'generating-insights' | 'complete' | 'error';
+    message: string;
+    progress: number; // 0-100
+  } | null;
   transcript?: string;
   audioUrl?: string;
   onRegenerateTranscript?: () => void;
@@ -51,9 +56,10 @@ interface CallAnalysisPanelProps {
   diarizationStatus?: string;
 }
 
-export const CallAnalysisPanel: React.FC<CallAnalysisPanelProps> = ({
+const CallAnalysisPanelComponent: React.FC<CallAnalysisPanelProps> = ({
   analysis,
   isLoading,
+  analysisStatus,
   transcript,
   audioUrl,
   onRegenerateTranscript,
@@ -66,8 +72,10 @@ export const CallAnalysisPanel: React.FC<CallAnalysisPanelProps> = ({
   customerName,
   diarizationStatus
 }) => {
-  // Debug logging
-  console.log('CallAnalysisPanel rendered with callRecordId:', callRecordId);
+  // Debug logging - only log when props actually change
+  React.useEffect(() => {
+    console.log('CallAnalysisPanel rendered with callRecordId:', callRecordId);
+  }, [callRecordId]);
   const [isSpeakerEditorOpen, setIsSpeakerEditorOpen] = useState(false);
   const [currentSpeakerMapping, setCurrentSpeakerMapping] = useState<Record<string, string>>(speakerMapping || {});
   const [isSMSSenderOpen, setIsSMSSenderOpen] = useState(false);
@@ -88,18 +96,85 @@ export const CallAnalysisPanel: React.FC<CallAnalysisPanelProps> = ({
     setIsSpeakerEditorOpen(false);
   };
   if (isLoading) {
+    const statusMessage = analysisStatus?.message || 'Analyzing transcript...';
+    const progress = analysisStatus?.progress || 0;
+    const stage = analysisStatus?.stage || 'analyzing';
+    
+    // Get icon based on stage
+    const getStageIcon = () => {
+      switch (stage) {
+        case 'waiting-transcript':
+          return <Clock className="h-5 w-5 animate-pulse" />;
+        case 'analyzing':
+          return <TrendingUp className="h-5 w-5 animate-pulse" />;
+        case 'generating-insights':
+          return <BarChart3 className="h-5 w-5 animate-pulse" />;
+        case 'error':
+          return <AlertCircle className="h-5 w-5 text-destructive" />;
+        default:
+          return <RefreshCw className="h-5 w-5 animate-spin" />;
+      }
+    };
+
+    // Get stage label
+    const getStageLabel = () => {
+      switch (stage) {
+        case 'waiting-transcript':
+          return 'Waiting for Transcript';
+        case 'analyzing':
+          return 'Checking Analysis';
+        case 'generating-insights':
+          return 'Generating Insights';
+        case 'error':
+          return 'Error';
+        default:
+          return 'Processing';
+      }
+    };
+
     return (
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <TrendingUp className="h-5 w-5" />
+            {getStageIcon()}
             Call Analysis
           </CardTitle>
         </CardHeader>
-        <CardContent>
-          <div className="text-center py-4 text-muted-foreground">
-            Analyzing transcript...
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <div className="flex items-center justify-between text-sm">
+              <span className="font-medium">{getStageLabel()}</span>
+              <span className="text-muted-foreground">{progress}%</span>
+            </div>
+            <Progress value={progress} className="h-2" />
+            <p className="text-sm text-muted-foreground text-center">
+              {statusMessage}
+            </p>
           </div>
+          
+          {stage === 'waiting-transcript' && (
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+              <p className="text-sm text-blue-900">
+                The audio file is being transcribed. This typically takes 1-2 minutes depending on the length of the recording.
+              </p>
+            </div>
+          )}
+          
+          {stage === 'generating-insights' && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+              <p className="text-sm text-amber-900">
+                Our AI is analyzing the conversation and generating insights. This may take 30-60 seconds.
+              </p>
+            </div>
+          )}
+          
+          {stage === 'error' && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+              <p className="text-sm text-red-900">
+                {statusMessage}
+              </p>
+            </div>
+          )}
         </CardContent>
       </Card>
     );
@@ -1065,3 +1140,21 @@ export const CallAnalysisPanel: React.FC<CallAnalysisPanelProps> = ({
     </div>
   );
 };
+
+// Memoize the component to prevent unnecessary re-renders when parent state changes
+export const CallAnalysisPanel = memo(CallAnalysisPanelComponent, (prevProps, nextProps) => {
+  // Only re-render if these key props change
+  return (
+    prevProps.callRecordId === nextProps.callRecordId &&
+    prevProps.analysis === nextProps.analysis &&
+    prevProps.isLoading === nextProps.isLoading &&
+    prevProps.analysisStatus?.stage === nextProps.analysisStatus?.stage &&
+    prevProps.analysisStatus?.progress === nextProps.analysisStatus?.progress &&
+    prevProps.transcript === nextProps.transcript &&
+    prevProps.audioUrl === nextProps.audioUrl &&
+    prevProps.regeneratingTranscript === nextProps.regeneratingTranscript &&
+    prevProps.callDuration === nextProps.callDuration &&
+    JSON.stringify(prevProps.speakerMapping) === JSON.stringify(nextProps.speakerMapping) &&
+    JSON.stringify(prevProps.diarizationSegments) === JSON.stringify(nextProps.diarizationSegments)
+  );
+});

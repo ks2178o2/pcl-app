@@ -288,7 +288,7 @@ export default function SystemCheck() {
 
     // Check Backend API
     try {
-      const apiUrl = (import.meta as any)?.env?.VITE_API_URL || 'http://localhost:8000';
+      const apiUrl = (import.meta as any)?.env?.VITE_API_URL || 'http://localhost:8001';
       const response = await fetch(`${apiUrl}/health`);
       const data = await response.json();
       results.push({
@@ -302,13 +302,13 @@ export default function SystemCheck() {
         name: 'Backend API',
         status: 'warning',
         message: 'Backend API not accessible',
-        details: err instanceof Error ? err.message : 'Ensure backend is running on port 8000'
+        details: err instanceof Error ? err.message : 'Ensure backend is running on port 8001'
       });
     }
 
     // Check RAG Feature Toggles API
     try {
-      const apiUrl = (import.meta as any)?.env?.VITE_API_URL || 'http://localhost:8000';
+      const apiUrl = (import.meta as any)?.env?.VITE_API_URL || 'http://localhost:8001';
       const response = await fetch(`${apiUrl}/api/v1/rag-features/catalog?is_active=true`);
       results.push({
         name: 'RAG Features API',

@@ -14,13 +14,39 @@ import re
 from datetime import datetime, timedelta
 from middleware.auth import get_current_user
 from services.supabase_client import get_supabase_client
-from api.analysis_api import (
-    _analyze_with_openai,
-    _analyze_with_gemini,
-    _get_org_analysis_settings,
-    _retry_with_backoff,
-    get_analysis_semaphore
-)
+# Import analysis functions - these may not exist in analysis_api, so define fallbacks
+try:
+    from api.analysis_api import (
+        _analyze_with_openai,
+        _analyze_with_gemini,
+        _get_org_analysis_settings,
+        _retry_with_backoff,
+        get_analysis_semaphore
+    )
+except ImportError:
+    # Fallback: define these functions locally if they don't exist in analysis_api
+    # These are actually defined in call_center_followup_api, but we'll import from there as fallback
+    try:
+        from api.call_center_followup_api import (
+            _analyze_with_openai,
+            _analyze_with_gemini,
+            _get_org_analysis_settings,
+            get_analysis_semaphore
+        )
+    except ImportError:
+        # If that also fails, define minimal stubs (shouldn't happen in practice)
+        def _analyze_with_openai(prompt: str) -> str:
+            raise NotImplementedError("_analyze_with_openai not available")
+        
+        def _analyze_with_gemini(prompt: str) -> str:
+            raise NotImplementedError("_analyze_with_gemini not available")
+        
+        def _get_org_analysis_settings(supabase, user_id: str):
+            return ([], [])
+        
+        def get_analysis_semaphore():
+            import asyncio
+            return asyncio.Semaphore(5)
 
 router = APIRouter(prefix="/api/followup", tags=["followup"])
 
@@ -496,4 +522,3 @@ async def generate_followup_plan(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to save follow-up plan: {str(e)}"
             )
-

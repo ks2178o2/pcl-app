@@ -1,0 +1,103 @@
+name: Deploy to AWS
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy'
+        required: true
+        type: choice
+        options:
+          - dev
+          - production
+
+jobs:
+  deploy-dev:
+    name: Auto-Deploy to Dev
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'dev')
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-2
+      
+      - name: Install EB CLI
+        run: pip install awsebcli
+      
+      - name: Deploy Backend to Dev
+        run: eb deploy hero-labs-dev --timeout 20
+      
+      - name: Build Frontend for Dev
+        working-directory: ./apps/realtime-gateway
+        run: |
+          npm install
+          npm run build
+      
+      - name: Deploy Frontend to Dev S3
+        run: |
+          aws s3 sync apps/realtime-gateway/dist/ s3://dev-hero-labs-pitcrewlabs-ai/ --delete
+          aws cloudfront create-invalidation --distribution-id ELVKCQCR99YYQ --paths "/*"
+
+  deploy-production:
+    name: Manual Deploy to Production
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'production'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-2
+      
+      - name: Install EB CLI
+        run: pip install awsebcli
+      
+      - name: Deploy Backend to Prod
+        run: eb deploy hero-labs-prod --timeout 20
+      
+      - name: Build Frontend for Prod
+        working-directory: ./apps/realtime-gateway
+        run: |
+          npm install
+          npm run build
+          sed -i 's|https://api.dev.hero.labs.pitcrewlabs.ai|https://api.hero.labs.pitcrewlabs.ai|g' dist/assets/*.js
+      
+      - name: Deploy Frontend to Prod S3
+        run: |
+          aws s3 sync apps/realtime-gateway/dist/ s3://hero-labs-pitcrewlabs-ai/ --delete
+          aws cloudfront create-invalidation --distribution-id E3L4D4NRG8A41R --paths "/*"
