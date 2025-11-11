@@ -148,7 +148,9 @@ app = FastAPI(
 )
 
 # Configure CORS properly - allow env override (MUST be before routes)
-ALLOWED_ORIGINS = [origin.strip() for origin in os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:3005").split(",")]
+# Default origins include localhost for development and production domain
+default_origins = "http://localhost:3000,http://localhost:3005,https://dev.hero.labs.pitcrewlabs.ai"
+ALLOWED_ORIGINS = [origin.strip() for origin in os.getenv("CORS_ORIGINS", default_origins).split(",")]
 
 # Add CORS middleware with proper configuration (BEFORE routes)
 app.add_middleware(

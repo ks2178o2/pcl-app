@@ -26,8 +26,7 @@ import {
 // ==================== API CONFIGURATION ====================
 
 import { supabase } from '@/integrations/supabase/client';
-
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+import { getApiUrl } from '@/utils/apiConfig';
 
 // Get auth token from Supabase
 const getAuthToken = async (): Promise<string | null> => {
@@ -83,7 +82,7 @@ export const ragFeatureCatalogApi = {
   }): Promise<RAGFeatureListResponse> {
     const queryString = buildQueryString(params || {});
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE_URL}/api/v1/rag-features/catalog${queryString}`, {
+    const response = await fetch(getApiUrl(`/api/v1/rag-features/catalog${queryString}`), {
       method: 'GET',
       headers,
     });
@@ -95,7 +94,7 @@ export const ragFeatureCatalogApi = {
    * Get a specific RAG feature by name
    */
   async getFeature(featureName: string): Promise<RAGFeatureResponse> {
-    const response = await fetch(`${API_BASE_URL}/api/v1/rag-features/catalog/${encodeURIComponent(featureName)}`, {
+    const response = await fetch(getApiUrl(`/api/v1/rag-features/catalog/${encodeURIComponent(featureName)}`), {
       method: 'GET',
       headers: await getAuthHeaders(),
     });
@@ -107,7 +106,7 @@ export const ragFeatureCatalogApi = {
    * Create a new RAG feature (System Admin only)
    */
   async createFeature(request: RAGFeatureCreateRequest): Promise<RAGFeatureResponse> {
-    const response = await fetch(`${API_BASE_URL}/api/v1/rag-features/catalog`, {
+    const response = await fetch(getApiUrl('/api/v1/rag-features/catalog'), {
       method: 'POST',
       headers: await getAuthHeaders(),
       body: JSON.stringify(request),
@@ -120,7 +119,7 @@ export const ragFeatureCatalogApi = {
    * Update an existing RAG feature (System Admin only)
    */
   async updateFeature(featureName: string, request: RAGFeatureUpdateRequest): Promise<RAGFeatureResponse> {
-    const response = await fetch(`${API_BASE_URL}/api/v1/rag-features/catalog/${encodeURIComponent(featureName)}`, {
+    const response = await fetch(getApiUrl(`/api/v1/rag-features/catalog/${encodeURIComponent(featureName)}`), {
       method: 'PATCH',
       headers: await getAuthHeaders(),
       body: JSON.stringify(request),
@@ -133,7 +132,7 @@ export const ragFeatureCatalogApi = {
    * Delete a RAG feature (System Admin only)
    */
   async deleteFeature(featureName: string): Promise<APIResponse> {
-    const response = await fetch(`${API_BASE_URL}/api/v1/rag-features/catalog/${encodeURIComponent(featureName)}`, {
+    const response = await fetch(getApiUrl(`/api/v1/rag-features/catalog/${encodeURIComponent(featureName)}`), {
       method: 'DELETE',
       headers: await getAuthHeaders(),
     });
@@ -145,7 +144,7 @@ export const ragFeatureCatalogApi = {
    * Get available RAG feature categories with counts
    */
   async getCategories(): Promise<APIResponse<Record<RAGFeatureCategory, any>>> {
-    const response = await fetch(`${API_BASE_URL}/api/v1/rag-features/catalog/categories`, {
+    const response = await fetch(getApiUrl('/api/v1/rag-features/catalog/categories'), {
       method: 'GET',
       headers: await getAuthHeaders(),
     });
@@ -168,7 +167,7 @@ export const organizationToggleApi = {
   }): Promise<RAGToggleListResponse> {
     const queryString = buildQueryString(params || {});
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE_URL}/api/v1/orgs/${encodeURIComponent(orgId)}/rag-toggles${queryString}`, {
+    const response = await fetch(getApiUrl(`/api/v1/orgs/${encodeURIComponent(orgId)}/rag-toggles${queryString}`), {
       method: 'GET',
       headers,
     });
@@ -180,7 +179,7 @@ export const organizationToggleApi = {
    * Get a specific RAG feature toggle for an organization
    */
   async getToggle(orgId: string, featureName: string): Promise<RAGToggleResponse> {
-    const response = await fetch(`${API_BASE_URL}/api/v1/orgs/${encodeURIComponent(orgId)}/rag-toggles/${encodeURIComponent(featureName)}`, {
+    const response = await fetch(getApiUrl(`/api/v1/orgs/${encodeURIComponent(orgId)}/rag-toggles/${encodeURIComponent(featureName)}`), {
       method: 'GET',
       headers: await getAuthHeaders(),
     });
@@ -192,7 +191,7 @@ export const organizationToggleApi = {
    * Update a RAG feature toggle for an organization (Admin only)
    */
   async updateToggle(orgId: string, featureName: string, request: RAGToggleUpdateRequest): Promise<RAGToggleResponse> {
-    const response = await fetch(`${API_BASE_URL}/api/v1/orgs/${encodeURIComponent(orgId)}/rag-toggles/${encodeURIComponent(featureName)}`, {
+    const response = await fetch(getApiUrl(`/api/v1/orgs/${encodeURIComponent(orgId)}/rag-toggles/${encodeURIComponent(featureName)}`), {
       method: 'PATCH',
       headers: await getAuthHeaders(),
       body: JSON.stringify(request),
@@ -205,7 +204,7 @@ export const organizationToggleApi = {
    * Bulk update RAG feature toggles for an organization (Admin only)
    */
   async bulkUpdateToggles(orgId: string, request: BulkToggleUpdateRequest): Promise<RAGToggleListResponse> {
-    const response = await fetch(`${API_BASE_URL}/api/v1/orgs/${encodeURIComponent(orgId)}/rag-toggles/bulk`, {
+    const response = await fetch(getApiUrl(`/api/v1/orgs/${encodeURIComponent(orgId)}/rag-toggles/bulk`), {
       method: 'POST',
       headers: await getAuthHeaders(),
       body: JSON.stringify(request),
@@ -219,7 +218,7 @@ export const organizationToggleApi = {
    */
   async getEnabledFeatures(orgId: string, category?: RAGFeatureCategory): Promise<EnabledFeaturesResponse> {
     const queryString = buildQueryString({ category });
-    const response = await fetch(`${API_BASE_URL}/api/v1/orgs/${encodeURIComponent(orgId)}/rag-toggles/enabled${queryString}`, {
+    const response = await fetch(getApiUrl(`/api/v1/orgs/${encodeURIComponent(orgId)}/rag-toggles/enabled${queryString}`), {
       method: 'GET',
       headers: await getAuthHeaders(),
     });
@@ -231,7 +230,7 @@ export const organizationToggleApi = {
    * Get RAG features inherited from parent organization
    */
   async getInheritedFeatures(orgId: string): Promise<RAGToggleListResponse> {
-    const response = await fetch(`${API_BASE_URL}/api/v1/orgs/${encodeURIComponent(orgId)}/rag-toggles/inherited`, {
+    const response = await fetch(getApiUrl(`/api/v1/orgs/${encodeURIComponent(orgId)}/rag-toggles/inherited`), {
       method: 'GET',
       headers: await getAuthHeaders(),
     });
@@ -243,7 +242,7 @@ export const organizationToggleApi = {
    * Get summary statistics for RAG feature toggles
    */
   async getSummary(orgId: string): Promise<RAGFeatureSummaryResponse> {
-    const response = await fetch(`${API_BASE_URL}/api/v1/orgs/${encodeURIComponent(orgId)}/rag-toggles/summary`, {
+    const response = await fetch(getApiUrl(`/api/v1/orgs/${encodeURIComponent(orgId)}/rag-toggles/summary`), {
       method: 'GET',
       headers: await getAuthHeaders(),
     });
@@ -351,7 +350,7 @@ export const ragFeaturesApi = {
    * Get organization hierarchy tree
    */
   async getOrganizationHierarchy(orgId: string): Promise<OrganizationTreeNode[]> {
-    const response = await fetch(`${API_BASE_URL}/api/v1/orgs/${encodeURIComponent(orgId)}/hierarchy`, {
+    const response = await fetch(getApiUrl(`/api/v1/orgs/${encodeURIComponent(orgId)}/hierarchy`), {
       method: 'GET',
       headers: await getAuthHeaders(),
     });
@@ -363,7 +362,7 @@ export const ragFeaturesApi = {
    * Get pending sharing requests for an organization
    */
   async getPendingSharingRequests(orgId: string): Promise<SharingRequest[]> {
-    const response = await fetch(`${API_BASE_URL}/api/v1/orgs/${encodeURIComponent(orgId)}/sharing/pending`, {
+    const response = await fetch(getApiUrl(`/api/v1/orgs/${encodeURIComponent(orgId)}/sharing/pending`), {
       method: 'GET',
       headers: await getAuthHeaders(),
     });
@@ -375,7 +374,7 @@ export const ragFeaturesApi = {
    * Approve a sharing request
    */
   async approveSharingRequest(requestId: string, approvedBy: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/api/v1/sharing/${encodeURIComponent(requestId)}/approve`, {
+    const response = await fetch(getApiUrl(`/api/v1/sharing/${encodeURIComponent(requestId)}/approve`), {
       method: 'POST',
       headers: await getAuthHeaders(),
       body: JSON.stringify({ approved_by: approvedBy }),
@@ -388,7 +387,7 @@ export const ragFeaturesApi = {
    * Reject a sharing request
    */
   async rejectSharingRequest(requestId: string, rejectedBy: string, reason?: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/api/v1/sharing/${encodeURIComponent(requestId)}/reject`, {
+    const response = await fetch(getApiUrl(`/api/v1/sharing/${encodeURIComponent(requestId)}/reject`), {
       method: 'POST',
       headers: await getAuthHeaders(),
       body: JSON.stringify({ rejected_by: rejectedBy, reason }),

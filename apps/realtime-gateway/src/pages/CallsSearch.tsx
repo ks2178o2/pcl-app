@@ -294,10 +294,10 @@ export const CallsSearch: React.FC = () => {
       }
       
       // Call FastAPI to transcribe this call by ID (backend fetches audio internally)
-      const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8001';
+      const { getApiUrl } = await import('@/utils/apiConfig');
       const { data: sess } = await supabase.auth.getSession();
       const token = sess.session?.access_token;
-      const resp = await fetch(`${API_BASE_URL}/api/transcribe/call-record/${encodeURIComponent(call.id)}?enable_diarization=true`, {
+      const resp = await fetch(getApiUrl(`/api/transcribe/call-record/${encodeURIComponent(call.id)}?enable_diarization=true`), {
         method: 'POST',
         headers: {
           'Authorization': token ? `Bearer ${token}` : '',

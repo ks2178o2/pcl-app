@@ -25,16 +25,15 @@ export const AnalysisSettingsManagement: React.FC = () => {
   const [primaryProvider, setPrimaryProvider] = useState<string>('openai');
   const [backupProvider, setBackupProvider] = useState<string>('gemini');
 
-  const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8001';
-
   const loadSettings = async () => {
     setLoading(true);
     try {
+      const { getApiUrl } = await import('@/utils/apiConfig');
       const { supabase } = await import('@/integrations/supabase/client');
       const { data: sessionData } = await supabase.auth.getSession();
       const token = sessionData?.session?.access_token;
 
-      const resp = await fetch(`${API_BASE_URL}/api/analysis/settings`, {
+      const resp = await fetch(getApiUrl('/api/analysis/settings'), {
         headers: {
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
@@ -93,7 +92,8 @@ export const AnalysisSettingsManagement: React.FC = () => {
         enabled_providers: enabledProviders,
       };
 
-      const resp = await fetch(`${API_BASE_URL}/api/analysis/settings`, {
+      const { getApiUrl } = await import('@/utils/apiConfig');
+      const resp = await fetch(getApiUrl('/api/analysis/settings'), {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',

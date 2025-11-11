@@ -284,7 +284,7 @@ export const useCallRecords = () => {
           let transcriptionResult: any, transcriptionError: any;
           
           // Replace edge function call with backend proxy for portability
-          const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8001';
+          const { getApiUrl } = await import('@/utils/apiConfig');
           const form = new FormData();
           form.append('file', audioBlob, 'recording.webm');
           form.append('provider', 'deepgram');
@@ -295,7 +295,7 @@ export const useCallRecords = () => {
           try {
             const { data: sessionData } = await supabase.auth.getSession();
             const token = sessionData?.session?.access_token;
-            const resp = await fetch(`${API_BASE_URL}/api/transcribe/upload`, {
+            const resp = await fetch(getApiUrl('/api/transcribe/upload'), {
               method: 'POST',
               headers: token ? { Authorization: `Bearer ${token}` } : undefined,
               body: form,
@@ -314,7 +314,7 @@ export const useCallRecords = () => {
               const start = Date.now();
               let transcriptText: string | null = null;
               for (;;) {
-                const statusResp = await fetch(`${API_BASE_URL}/api/transcribe/status/${uploadId}`, {
+                const statusResp = await fetch(getApiUrl(`/api/transcribe/status/${uploadId}`), {
                   headers: { Authorization: `Bearer ${token}` },
                 });
                 if (statusResp.ok) {

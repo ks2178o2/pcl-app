@@ -231,11 +231,11 @@ export const FollowUpPlanPanel: React.FC<FollowUpPlanPanelProps> = ({
     try {
       setIsGenerating(true);
       
-      const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8001';
+      const { getApiUrl } = await import('@/utils/apiConfig');
       const { data: sess } = await supabase.auth.getSession();
       const token = sess.session?.access_token;
       
-      const resp = await fetch(`${API_BASE_URL}/api/followup/generate`, {
+      const resp = await fetch(getApiUrl('/api/followup/generate'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

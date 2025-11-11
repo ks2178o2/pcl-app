@@ -33,8 +33,7 @@ import { useToast } from '@/hooks/use-toast';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { FollowUpPlanPanel } from '@/components/FollowUpPlanPanel';
-
-const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8001';
+import { getApiUrl } from '@/utils/apiConfig';
 
 interface CallRecord {
   id: string;
@@ -213,7 +212,7 @@ export const BulkImportPage: React.FC = () => {
       const { data: sessionData } = await (await import('@/integrations/supabase/client')).supabase.auth.getSession();
       const token = sessionData?.session?.access_token;
 
-      const response = await fetch(`${API_BASE_URL}/api/bulk-import/jobs`, {
+      const response = await fetch(getApiUrl('/api/bulk-import/jobs'), {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
@@ -246,7 +245,7 @@ export const BulkImportPage: React.FC = () => {
       const token = sessionData?.session?.access_token;
 
       // Always include files for detailed status
-      const response = await fetch(`${API_BASE_URL}/api/bulk-import/status/${jobId}?include_files=true`, {
+      const response = await fetch(getApiUrl(`/api/bulk-import/status/${jobId}?include_files=true`), {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
@@ -384,7 +383,7 @@ export const BulkImportPage: React.FC = () => {
       const { data: sessionData } = await (await import('@/integrations/supabase/client')).supabase.auth.getSession();
       const token = sessionData?.session?.access_token;
 
-      const response = await fetch(`${API_BASE_URL}/api/bulk-import/start`, {
+      const response = await fetch(getApiUrl('/api/bulk-import/start'), {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -1110,7 +1109,7 @@ export const BulkImportPage: React.FC = () => {
                                               confidence: file.call_record.categorization_confidence,
                                               notes: file.call_record.categorization_notes,
                                             };
-                                            const resp = await fetch(`${API_BASE_URL}/api/call-center/followup/generate`, {
+                                            const resp = await fetch(getApiUrl('/api/call-center/followup/generate'), {
                                               method: 'POST',
                                               headers: {
                                                 'Authorization': `Bearer ${token}`,
@@ -1220,7 +1219,7 @@ export const BulkImportPage: React.FC = () => {
                                     
                                     console.log(`🔄 Frontend: Making POST request to /api/bulk-import/retranscribe/${callRecordId}`);
                                     const response = await fetch(
-                                      `${API_BASE_URL}/api/bulk-import/retranscribe/${callRecordId}`,
+                                      getApiUrl(`/api/bulk-import/retranscribe/${callRecordId}`),
                                       {
                                         method: 'POST',
                                         headers: {
@@ -1385,7 +1384,7 @@ export const BulkImportPage: React.FC = () => {
                                       
                                       console.log(`🔄 Frontend: Making POST request to /api/bulk-import/retranscribe/${callRecordId}`);
                                       const response = await fetch(
-                                        `${API_BASE_URL}/api/bulk-import/retranscribe/${callRecordId}`,
+                                        getApiUrl(`/api/bulk-import/retranscribe/${callRecordId}`),
                                         {
                                           method: 'POST',
                                           headers: {

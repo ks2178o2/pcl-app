@@ -169,7 +169,8 @@ export const EnhancedContextManagement: React.FC = () => {
   const loadGlobalItems = async () => {
     setLoading(true);
     try {
-      const response = await fetch('/api/enhanced-context/global/items');
+      const { getApiUrl } = await import('@/utils/apiConfig');
+      const response = await fetch(getApiUrl('/api/enhanced-context/global/items'));
       const data = await response.json();
       if (data.success) {
         setGlobalItems(data.items);
@@ -185,7 +186,8 @@ export const EnhancedContextManagement: React.FC = () => {
     setLoading(true);
     try {
       // This would be a custom endpoint to get all tenant access
-      const response = await fetch('/api/enhanced-context/access/list');
+      const { getApiUrl } = await import('@/utils/apiConfig');
+      const response = await fetch(getApiUrl('/api/enhanced-context/access/list'));
       const data = await response.json();
       if (data.success) {
         setTenantAccess(data.access_list);
@@ -200,7 +202,8 @@ export const EnhancedContextManagement: React.FC = () => {
   const loadContextSharing = async () => {
     setLoading(true);
     try {
-      const response = await fetch('/api/enhanced-context/sharing/received');
+      const { getApiUrl } = await import('@/utils/apiConfig');
+      const response = await fetch(getApiUrl('/api/enhanced-context/sharing/received'));
       const data = await response.json();
       if (data.success) {
         setContextSharing(data.shared_items);
@@ -215,7 +218,8 @@ export const EnhancedContextManagement: React.FC = () => {
   const loadOrganizationQuotas = async () => {
     setLoading(true);
     try {
-      const response = await fetch(`/api/enhanced-context/quotas/${user?.organization_id}`);
+      const { getApiUrl } = await import('@/utils/apiConfig');
+      const response = await fetch(getApiUrl(`/api/enhanced-context/quotas/${user?.organization_id}`));
       const data = await response.json();
       if (data.success) {
         setOrganizationQuotas([data.quotas]);
@@ -229,7 +233,8 @@ export const EnhancedContextManagement: React.FC = () => {
 
   const handleAddGlobalItem = async () => {
     try {
-      const response = await fetch('/api/enhanced-context/global/add', {
+      const { getApiUrl } = await import('@/utils/apiConfig');
+      const response = await fetch(getApiUrl('/api/enhanced-context/global/add'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -261,7 +266,8 @@ export const EnhancedContextManagement: React.FC = () => {
 
   const handleGrantAccess = async () => {
     try {
-      const response = await fetch('/api/enhanced-context/access/grant', {
+      const { getApiUrl } = await import('@/utils/apiConfig');
+      const response = await fetch(getApiUrl('/api/enhanced-context/access/grant'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -288,7 +294,8 @@ export const EnhancedContextManagement: React.FC = () => {
 
   const handleShareItem = async () => {
     try {
-      const response = await fetch('/api/enhanced-context/sharing/share', {
+      const { getApiUrl } = await import('@/utils/apiConfig');
+      const response = await fetch(getApiUrl('/api/enhanced-context/sharing/share'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

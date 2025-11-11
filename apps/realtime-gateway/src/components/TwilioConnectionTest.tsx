@@ -14,8 +14,8 @@ export const TwilioConnectionTest: React.FC = () => {
     
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8001';
-      const resp = await fetch(`${API_BASE_URL}/api/twilio/test-connection`, {
+      const { getApiUrl } = await import('@/utils/apiConfig');
+      const resp = await fetch(getApiUrl('/api/twilio/test-connection'), {
         headers: {
           Authorization: session?.access_token ? `Bearer ${session.access_token}` : ''
         }
