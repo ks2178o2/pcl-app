@@ -14,6 +14,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
 import { NavigationMenu } from '@/components/NavigationMenu';
 import { useCenterSession } from '@/hooks/useCenterSession';
+import { getApiUrl } from '@/utils/apiConfig';
 
 export const CallAnalysisPage: React.FC = () => {
   const { callId } = useParams<{ callId: string }>();
@@ -339,8 +340,6 @@ export const CallAnalysisPage: React.FC = () => {
       const vendorInsights = freshData?.vendor_insights || callData?.vendor_insights;
       const uploadId = typeof vendorInsights === 'object' && vendorInsights !== null ? (vendorInsights as any)?.transcription_upload_id : null;
       
-      const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8001';
-      
       // If no uploadId but transcript is still placeholder, trigger transcription
       // Note: We trigger even if audio_file_url is missing, as the backend may handle it differently
       // IMPORTANT: Only trigger once per call to prevent infinite loops
@@ -358,7 +357,7 @@ export const CallAnalysisPage: React.FC = () => {
           const { data: sessionData } = await supabase.auth.getSession();
           const token = sessionData?.session?.access_token;
           if (token) {
-            const resp = await fetch(`${API_BASE_URL}/api/transcribe/call-record/${callId}?enable_diarization=true`, {
+            const resp = await fetch(getApiUrl(`/api/transcribe/call-record/${callId}?enable_diarization=true`), {
               method: 'POST',
               headers: { Authorization: `Bearer ${token}` },
             });
@@ -456,8 +455,7 @@ export const CallAnalysisPage: React.FC = () => {
                 const { data: sessionData } = await supabase.auth.getSession();
                 const token = sessionData?.session?.access_token;
                 if (token) {
-                  const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8001';
-                  const statusResp = await fetch(`${API_BASE_URL}/api/transcribe/status/${uploadId}`, {
+                  const statusResp = await fetch(getApiUrl(`/api/transcribe/status/${uploadId}`), {
                     headers: { Authorization: `Bearer ${token}` },
                   });
                   if (statusResp.ok) {
@@ -819,11 +817,10 @@ export const CallAnalysisPage: React.FC = () => {
         }
         
         // Use the new endpoint that works with call_record_id
-        const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8001';
         const { data: sess } = await supabase.auth.getSession();
         const token = sess.session?.access_token;
         
-        const resp = await fetch(`${API_BASE_URL}/api/transcribe/call-record/${encodeURIComponent(callId)}?enable_diarization=true&provider=${encodeURIComponent(transcriptionProvider)}`, {
+        const resp = await fetch(getApiUrl(`/api/transcribe/call-record/${encodeURIComponent(callId)}?enable_diarization=true&provider=${encodeURIComponent(transcriptionProvider)}`), {
           method: 'POST',
           headers: {
             'Authorization': token ? `Bearer ${token}` : '',
@@ -852,10 +849,9 @@ export const CallAnalysisPage: React.FC = () => {
       toast.success(`Found ${chunks.length} chunks. Attempting transcription with diarization...`);
       setDiarizationStatus(`Found ${chunks.length} chunks. Requesting diarization from ${transcriptionProvider}...`);
 
-      const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8001';
       const { data: sess } = await supabase.auth.getSession();
       const token = sess.session?.access_token;
-      const resp = await fetch(`${API_BASE_URL}/api/transcribe/call-record/${encodeURIComponent(callId)}?enable_diarization=true&provider=${encodeURIComponent(transcriptionProvider)}`, {
+      const resp = await fetch(getApiUrl(`/api/transcribe/call-record/${encodeURIComponent(callId)}?enable_diarization=true&provider=${encodeURIComponent(transcriptionProvider)}`), {
         method: 'POST',
         headers: {
           'Authorization': token ? `Bearer ${token}` : '',
@@ -911,11 +907,10 @@ export const CallAnalysisPage: React.FC = () => {
     try {
       const salespersonName = (user as any).user_metadata?.salesperson_name || 'Provider';
       
-      const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8001';
       const { data: sess } = await supabase.auth.getSession();
       const token = sess.session?.access_token;
       
-      const url = `${API_BASE_URL}/api/transcribe/call-record/${encodeURIComponent(callId)}?enable_diarization=true&provider=${encodeURIComponent(transcriptionProvider)}`;
+      const url = getApiUrl(`/api/transcribe/call-record/${encodeURIComponent(callId)}?enable_diarization=true&provider=${encodeURIComponent(transcriptionProvider)}`);
       console.log('[handleRegenerateTranscript] Sending POST to:', url);
       console.log('[handleRegenerateTranscript] Headers:', { Authorization: token ? 'Bearer ***' : 'none' });
       

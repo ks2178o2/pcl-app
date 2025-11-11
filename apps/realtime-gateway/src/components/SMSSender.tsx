@@ -51,8 +51,8 @@ export const SMSSender = ({
         throw new Error('Not authenticated');
       }
 
-      const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8001';
-      const resp = await fetch(`${API_BASE_URL}/api/twilio/send-sms`, {
+      const { getApiUrl } = await import('@/utils/apiConfig');
+      const resp = await fetch(getApiUrl('/api/twilio/send-sms'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

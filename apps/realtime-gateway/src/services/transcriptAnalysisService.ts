@@ -160,12 +160,12 @@ export type AnalysisEngine = 'auto' | 'vendor' | 'llm';
 
 class TranscriptAnalysisService {
   private async callLLM(prompt: string, provider?: LLMProvider): Promise<string> {
-    const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8001';
+    const { getApiUrl } = await import('@/utils/apiConfig');
     const { supabase } = await import('@/integrations/supabase/client');
     const { data: sessionData } = await supabase.auth.getSession();
     const token = sessionData?.session?.access_token;
     
-    const url = `${API_BASE_URL}/api/analysis/analyze`;
+    const url = getApiUrl('/api/analysis/analyze');
     const payload = { prompt, ...(provider ? { provider } : {}) };
     
     console.log(`[callLLM] Sending request to ${url}`, { provider, promptLength: prompt.length });

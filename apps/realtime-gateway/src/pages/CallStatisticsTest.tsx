@@ -10,8 +10,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { NavigationMenu } from '@/components/NavigationMenu';
 import { useToast } from '@/hooks/use-toast';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-
-const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8001';
+import { getApiUrl } from '@/utils/apiConfig';
 
 interface CallTypeStatistics {
   call_type: string;
@@ -71,7 +70,7 @@ export const CallStatisticsTest: React.FC = () => {
       }
 
       // Build URL with optional date filters
-      let url = `${API_BASE_URL}/api/call-statistics/call-types`;
+      let url = getApiUrl('/api/call-statistics/call-types');
       const params = new URLSearchParams();
       if (startDate) params.append('start_date', startDate);
       if (endDate) params.append('end_date', endDate);

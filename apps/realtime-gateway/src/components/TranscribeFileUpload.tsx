@@ -51,7 +51,6 @@ export const TranscribeFileUpload: React.FC<TranscribeFileUploadProps> = ({
   const [language, setLanguage] = useState<string>('');
   const [isDragging, setIsDragging] = useState(false);
   const [dragCounter, setDragCounter] = useState(0);
-  const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8001';
 
   // Handle file selection
   const handleFileSelect = useCallback((file: File) => {
@@ -226,7 +225,8 @@ export const TranscribeFileUpload: React.FC<TranscribeFileUploadProps> = ({
         });
       });
 
-      xhr.open('POST', `${API_BASE_URL}/api/transcribe/upload`);
+      const { getApiUrl } = await import('@/utils/apiConfig');
+      xhr.open('POST', getApiUrl('/api/transcribe/upload'));
       xhr.setRequestHeader('Authorization', `Bearer ${session.access_token}`);
       xhr.send(formData);
 
