@@ -10,17 +10,32 @@
  * Get the API base URL for making requests
  * 
  * Priority:
- * 1. Use VITE_API_URL if explicitly set (build-time environment variable)
- * 2. In production (https or non-localhost), use empty string for relative URLs
+ * 1. Use VITE_API_URL if explicitly set (build-time environment variable) - REQUIRED in production
+ * 2. In production (https or non-localhost), use empty string for relative URLs (only if API is on same domain)
  * 3. In development, default to http://localhost:8001
+ * 
+ * IMPORTANT: For production deployments where frontend and backend are on different domains,
+ * you MUST set VITE_API_URL at build time. Relative URLs only work if there's a reverse proxy
+ * routing /api/* requests to the backend.
  */
 export function getApiBaseUrl(): string {
   // Check if VITE_API_URL is explicitly set at build time
   // Vite replaces import.meta.env.VITE_* at build time
   const envApiUrl = import.meta.env?.VITE_API_URL as string | undefined;
   
+  // Debug logging to help diagnose issues
+  if (typeof window !== 'undefined') {
+    console.log('🔍 API Config Debug:', {
+      VITE_API_URL: envApiUrl || 'NOT SET',
+      windowLocation: window.location.href,
+      importMetaEnv: import.meta.env
+    });
+  }
+  
   if (envApiUrl && envApiUrl.trim() !== '') {
-    return envApiUrl.trim();
+    const cleanUrl = envApiUrl.trim();
+    console.log('✅ Using VITE_API_URL:', cleanUrl);
+    return cleanUrl;
   }
   
   // If no explicit URL is set, check if we're in production
@@ -32,14 +47,18 @@ export function getApiBaseUrl(): string {
        !window.location.hostname.includes('127.0.0.1'));
     
     if (isProduction) {
-      // Use relative URL in production - API is served from same domain
-      // This avoids CORS issues when frontend and backend are on the same domain
+      // Use relative URL in production - ONLY works if there's a reverse proxy
+      // routing /api/* to the backend, or if API is on same domain
+      // If you see HTML errors instead of JSON, set VITE_API_URL at build time!
+      console.error('❌ VITE_API_URL not set in production build! Using relative URLs which may not work.');
+      console.error('💡 To fix: Set VITE_API_URL environment variable BEFORE running npm run build');
       return '';
     }
   }
   
   // Default to localhost for development
   // This is safe because in development, we're always on localhost
+  console.log('🔧 Using development default: http://localhost:8001');
   return 'http://localhost:8001';
 }
 

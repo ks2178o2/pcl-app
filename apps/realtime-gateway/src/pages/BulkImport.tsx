@@ -212,12 +212,27 @@ export const BulkImportPage: React.FC = () => {
       const { data: sessionData } = await (await import('@/integrations/supabase/client')).supabase.auth.getSession();
       const token = sessionData?.session?.access_token;
 
-      const response = await fetch(getApiUrl('/api/bulk-import/jobs'), {
+      const apiUrl = getApiUrl('/api/bulk-import/jobs');
+      console.log('🌐 Fetching jobs from:', apiUrl);
+      
+      const response = await fetch(apiUrl, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
       });
+      
+      console.log('📡 Response status:', response.status, response.statusText);
+      console.log('📡 Response headers:', Object.fromEntries(response.headers.entries()));
+      
+      // Check if response is actually JSON before parsing
+      const contentType = response.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        const text = await response.text();
+        console.error('❌ Expected JSON but got:', contentType);
+        console.error('❌ Response body (first 500 chars):', text.substring(0, 500));
+        throw new Error(`Expected JSON but got ${contentType}. Response: ${text.substring(0, 200)}`);
+      }
 
       if (!response.ok) {
         throw new Error('Failed to load jobs');
