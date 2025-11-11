@@ -24,7 +24,7 @@ qrcode[pil]==7.4.2
 email-validator==2.2.0
 
 # HTTP Client
-requests==2.31.0
+requests==2.32.4
 
 # Async Support
 aiofiles==23.2.1
