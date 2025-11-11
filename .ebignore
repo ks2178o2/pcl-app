@@ -1,0 +1,30 @@
+# Elastic Beanstalk ignore file
+# Files listed here will NOT be included in EB deployment
+# This is similar to .gitignore but specific to EB
+
+# Don't ignore dist/ - we need the built frontend files
+# dist/
+
+# Ignore development files
+node_modules/
+.git/
+.vscode/
+.idea/
+*.log
+.env.local
+.env.development
+.env.test
+
+# Ignore test files
+**/__tests__/
+**/*.test.ts
+**/*.test.tsx
+**/*.spec.ts
+**/*.spec.tsx
+coverage/
+test-results/
+
+# Ignore build artifacts we don't need
+*.map
+.DS_Store
+
