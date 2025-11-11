@@ -22,18 +22,23 @@ class SupabaseClientManager:
     def get_client(self) -> Client:
         """Get or create Supabase client"""
         if self._client is None:
-            supabase_url = os.getenv('SUPABASE_URL')
-            supabase_key = os.getenv('SUPABASE_SERVICE_ROLE_KEY')
+            # Use same defaults as main.py for consistency
+            supabase_url = os.getenv('SUPABASE_URL', 'https://xxdahmkfioqzgqvyabek.supabase.co')
+            # Support both SUPABASE_SERVICE_ROLE_KEY and SUPABASE_SERVICE_KEY for compatibility
+            supabase_key = os.getenv('SUPABASE_SERVICE_ROLE_KEY') or os.getenv('SUPABASE_SERVICE_KEY')
             
-            if not supabase_url or not supabase_key:
-                raise ValueError("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set")
+            if not supabase_key:
+                # Return None instead of raising error, to match main.py's behavior
+                logger.warning("SUPABASE_SERVICE_ROLE_KEY not set, Supabase client unavailable")
+                return None
             
             try:
                 self._client = create_client(supabase_url, supabase_key)
                 logger.info("Supabase client initialized successfully")
             except Exception as e:
                 logger.error(f"Failed to initialize Supabase client: {e}")
-                raise
+                # Return None instead of raising, to match main.py's behavior
+                return None
         
         return self._client
     

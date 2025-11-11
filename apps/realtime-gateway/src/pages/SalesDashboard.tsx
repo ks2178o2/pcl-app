@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -32,23 +32,82 @@ interface RecentActivity {
   message: string;
   timestamp: string;
   icon: React.ReactNode;
+  sortKey?: number; // Internal use for sorting
 }
 
 const SalesDashboard = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user, signOut } = useAuth();
   const { profile } = useProfile();
   const { calls, loadCalls } = useCallRecords();
-  const { appointments: dbAppointments, loading: appointmentsLoading } = useAppointments();
+  const { appointments: dbAppointments, loading: appointmentsLoading, loadAppointments } = useAppointments();
   const { metrics, loading: metricsLoading } = useDashboardMetrics();
   
-  // Load calls on mount
-  useEffect(() => {
-    if (user && profile) {
-      loadCalls(10);
+  // Simple, bulletproof approach: track last pathname and always reload when it matches
+  const lastPathnameRef = useRef<string>('');
+  
+  // BULLETPROOF: Always reload when pathname is /dashboard
+  // Use useLayoutEffect to run synchronously before paint
+  useLayoutEffect(() => {
+    if (!user || !profile) return;
+    
+    // Only proceed if we're actually on the dashboard route
+    if (location.pathname !== '/dashboard') {
+      lastPathnameRef.current = location.pathname;
+      return;
+    }
+    
+    const pathnameChanged = lastPathnameRef.current !== '/dashboard';
+    const isEmpty = dbAppointments.length === 0 && calls.length === 0;
+    
+    // ALWAYS reload if pathname changed TO /dashboard OR data is empty
+    if (pathnameChanged || isEmpty) {
+      lastPathnameRef.current = '/dashboard';
+      // Don't load here - let the useEffect below handle it when user/profile are ready
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, profile]);
+  }, [user, profile, location.pathname, dbAppointments.length, calls.length]);
+  
+  // Reload when user/profile are ready AND we're on dashboard route
+  // This ensures hooks have the latest user/profile before calling load functions
+  useEffect(() => {
+    if (!user || !profile || location.pathname !== '/dashboard') return;
+    
+    const pathnameChanged = lastPathnameRef.current !== '/dashboard';
+    const isEmpty = dbAppointments.length === 0 && calls.length === 0;
+    
+    // Reload if pathname changed to dashboard OR data is empty
+    if (pathnameChanged || isEmpty) {
+      lastPathnameRef.current = '/dashboard';
+      
+      // Wait a bit to ensure hooks have updated their refs with the latest user
+      const timer = setTimeout(() => {
+        loadCalls(10);
+        loadAppointments(new Date());
+      }, 100);
+      
+      return () => clearTimeout(timer);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, profile, location.pathname, dbAppointments.length, calls.length]);
+  
+  // Also reload when component becomes visible (handles tab switching)
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (!document.hidden && user && profile && location.pathname === '/dashboard') {
+        // Tab became visible - reload data
+        loadCalls(10);
+        loadAppointments(new Date());
+      }
+    };
+    
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, profile, location.pathname]);
 
   // Generate activity feed from calls and appointments (memoized)
   const activities = useMemo(() => {
@@ -56,8 +115,9 @@ const SalesDashboard = () => {
     
     // Add recent calls as activities
     if (calls && calls.length > 0) {
-      const recentCalls = calls.slice(0, 3);
-      recentCalls.forEach((call) => {
+      calls.forEach((call) => {
+        if (!call.timestamp) return; // Skip if no timestamp
+        
         const timeDiff = Date.now() - call.timestamp.getTime();
         const minutesAgo = Math.floor(timeDiff / 60000);
         const hoursAgo = Math.floor(minutesAgo / 60);
@@ -74,16 +134,19 @@ const SalesDashboard = () => {
         activitiesList.push({
           message: `Call logged with ${call.patientName}. Duration: ${Math.floor(call.duration / 60)}m ${call.duration % 60}s.`,
           timestamp,
-          icon: <Phone className="h-4 w-4" />
+          icon: <Phone className="h-4 w-4" />,
+          sortKey: call.timestamp.getTime()
         });
       });
     }
 
-    // Add recent appointments as activities
+    // Add recent appointments as activities (show all appointments, not just today's)
+    // We need to load all recent appointments, not just today's
+    // For now, we'll use today's appointments but show them in Recent Activity too
     if (dbAppointments && dbAppointments.length > 0) {
-      const recentApps = dbAppointments.slice(0, 2);
-      recentApps.forEach((apt) => {
-        const timeDiff = Date.now() - new Date(apt.created_at).getTime();
+      dbAppointments.forEach((apt) => {
+        const aptDate = new Date(apt.created_at || apt.appointment_date);
+        const timeDiff = Date.now() - aptDate.getTime();
         const minutesAgo = Math.floor(timeDiff / 60000);
         const hoursAgo = Math.floor(minutesAgo / 60);
         
@@ -97,14 +160,19 @@ const SalesDashboard = () => {
         }
 
         activitiesList.push({
-          message: `New appointment scheduled: ${apt.customer_name}`,
+          message: `Appointment scheduled: ${apt.customer_name}`,
           timestamp,
-          icon: <CalendarIcon className="h-4 w-4" />
+          icon: <CalendarIcon className="h-4 w-4" />,
+          sortKey: aptDate.getTime()
         });
       });
     }
 
-    return activitiesList;
+    // Sort by timestamp (most recent first) and limit to 5 most recent
+    return activitiesList
+      .sort((a, b) => (b.sortKey || 0) - (a.sortKey || 0))
+      .slice(0, 5)
+      .map(({ sortKey, ...activity }) => activity); // Remove sortKey before returning
   }, [calls, dbAppointments]);
 
   const getGreeting = () => {
@@ -171,38 +239,40 @@ const SalesDashboard = () => {
               </p>
             </div>
 
-            {/* KPI Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-              <MetricCard
-                title="New Leads This Week"
-                value={metrics.newLeadsThisWeek}
-                change={metrics.newLeadsChange}
-                isPositive={metrics.newLeadsChange >= 0}
-                icon={<TrendingUp className="h-4 w-4" />}
-              />
-              <MetricCard
-                title="Consultations Booked"
-                value={metrics.consultationsBooked}
-                change={metrics.consultationsChange}
-                isPositive={metrics.consultationsChange >= 0}
-                icon={<TrendingUp className="h-4 w-4" />}
-              />
-              <MetricCard
-                title="Deals Closed (Month)"
-                value={metrics.dealsClosedThisMonth}
-                change={metrics.dealsClosedChange}
-                isPositive={metrics.dealsClosedChange >= 0}
-                icon={<TrendingUp className="h-4 w-4" />}
-              />
-              <MetricCard
-                title="Revenue Generated"
-                value={formatCurrency(metrics.revenueGenerated)}
-                change={metrics.revenueChange}
-                isPositive={metrics.revenueChange >= 0}
-                icon={<TrendingUp className="h-4 w-4" />}
-                editable
-              />
-            </div>
+            {/* KPI Cards - Hidden for now */}
+            {false && (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                <MetricCard
+                  title="New Leads This Week"
+                  value={metrics.newLeadsThisWeek}
+                  change={metrics.newLeadsChange}
+                  isPositive={metrics.newLeadsChange >= 0}
+                  icon={<TrendingUp className="h-4 w-4" />}
+                />
+                <MetricCard
+                  title="Consultations Booked"
+                  value={metrics.consultationsBooked}
+                  change={metrics.consultationsChange}
+                  isPositive={metrics.consultationsChange >= 0}
+                  icon={<TrendingUp className="h-4 w-4" />}
+                />
+                <MetricCard
+                  title="Deals Closed (Month)"
+                  value={metrics.dealsClosedThisMonth}
+                  change={metrics.dealsClosedChange}
+                  isPositive={metrics.dealsClosedChange >= 0}
+                  icon={<TrendingUp className="h-4 w-4" />}
+                />
+                <MetricCard
+                  title="Revenue Generated"
+                  value={formatCurrency(metrics.revenueGenerated)}
+                  change={metrics.revenueChange}
+                  isPositive={metrics.revenueChange >= 0}
+                  icon={<TrendingUp className="h-4 w-4" />}
+                  editable
+                />
+              </div>
+            )}
 
             {/* Today's Focus and Recent Activity */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -226,49 +296,70 @@ const SalesDashboard = () => {
                   <div>
                     <h4 className="text-sm font-semibold text-foreground mb-4 uppercase tracking-wide">Scheduled Appointments</h4>
                     <div className="space-y-3">
-                      {dbAppointments && dbAppointments.length > 0 ? (
-                        dbAppointments.map((apt, idx) => {
-                          const aptDate = new Date(apt.appointment_date);
-                          // Use user's timezone if available, otherwise default to America/Los_Angeles for business hours
-                          // This ensures appointments created in Pacific time display correctly
-                          const displayTimezone = profile?.timezone || 'America/Los_Angeles';
-                          const timeStr = aptDate.toLocaleTimeString('en-US', { 
-                            hour: 'numeric', 
-                            minute: '2-digit',
-                            timeZone: displayTimezone
-                          });
-                          const today = new Date();
-                          const isToday = aptDate.toDateString() === today.toDateString();
-                          
-                          return (
-                            <div 
-                              key={apt.id} 
-                              className="flex items-start justify-between group p-3 rounded-lg hover:bg-accent/30 transition-colors cursor-pointer border border-transparent hover:border-primary/20"
-                              onClick={() => navigate('/schedule')}
-                            >
-                              <div className="flex items-start space-x-3 flex-1">
-                                <div className="mt-0.5 p-1.5 rounded-md bg-primary/10">
-                                  <CalendarIcon className="h-4 w-4 text-primary" />
-                                </div>
-                                <div className="flex-1">
-                                  <p className="font-semibold text-foreground">{timeStr} - {apt.customer_name}</p>
-                                  <p className="text-sm text-muted-foreground mt-0.5">
-                                    {isToday ? 'Today' : aptDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                                  </p>
-                                </div>
-                              </div>
-                              <Button variant="ghost" size="sm" className="opacity-0 group-hover:opacity-100 h-8 w-8 p-0">
-                                <MoreVertical className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          );
-                        })
-                      ) : (
+                      {appointmentsLoading ? (
                         <div className="text-center py-8">
-                          <CalendarIcon className="h-12 w-12 text-muted-foreground/30 mx-auto mb-3" />
-                          <p className="text-sm text-muted-foreground">No appointments scheduled for today</p>
+                          <CalendarIcon className="h-12 w-12 text-muted-foreground/30 mx-auto mb-3 animate-pulse" />
+                          <p className="text-sm text-muted-foreground">Loading appointments...</p>
                         </div>
-                      )}
+                      ) : (() => {
+                        // Filter appointments to only show today's appointments
+                        const today = new Date();
+                        const todayStr = today.toDateString();
+                        const userTimezone = profile?.timezone || 'America/Los_Angeles';
+                        
+                        const todayAppointments = (dbAppointments || []).filter((apt) => {
+                          const aptDate = new Date(apt.appointment_date);
+                          // Convert to user's timezone for comparison
+                          const aptDateInUserTZ = new Date(aptDate.toLocaleString('en-US', { timeZone: userTimezone }));
+                          const todayInUserTZ = new Date(today.toLocaleString('en-US', { timeZone: userTimezone }));
+                          return aptDateInUserTZ.toDateString() === todayInUserTZ.toDateString();
+                        }).sort((a, b) => {
+                          // Sort by appointment time
+                          return new Date(a.appointment_date).getTime() - new Date(b.appointment_date).getTime();
+                        });
+
+                        return todayAppointments.length > 0 ? (
+                          todayAppointments.map((apt, idx) => {
+                            const aptDate = new Date(apt.appointment_date);
+                            // Use user's timezone if available, otherwise default to America/Los_Angeles for business hours
+                            // This ensures appointments created in Pacific time display correctly
+                            const displayTimezone = profile?.timezone || 'America/Los_Angeles';
+                            const timeStr = aptDate.toLocaleTimeString('en-US', { 
+                              hour: 'numeric', 
+                              minute: '2-digit',
+                              timeZone: displayTimezone
+                            });
+                            
+                            return (
+                              <div 
+                                key={apt.id} 
+                                className="flex items-start justify-between group p-3 rounded-lg hover:bg-accent/30 transition-colors cursor-pointer border border-transparent hover:border-primary/20"
+                                onClick={() => navigate('/schedule')}
+                              >
+                                <div className="flex items-start space-x-3 flex-1">
+                                  <div className="mt-0.5 p-1.5 rounded-md bg-primary/10">
+                                    <CalendarIcon className="h-4 w-4 text-primary" />
+                                  </div>
+                                  <div className="flex-1">
+                                    <p className="font-semibold text-foreground">{timeStr} - {apt.customer_name}</p>
+                                    <p className="text-sm text-muted-foreground mt-0.5">
+                                      Today
+                                    </p>
+                                  </div>
+                                </div>
+                                <Button variant="ghost" size="sm" className="opacity-0 group-hover:opacity-100 h-8 w-8 p-0">
+                                  <MoreVertical className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            );
+                          })
+                        ) : (
+                          <div className="text-center py-8">
+                            <CalendarIcon className="h-12 w-12 text-muted-foreground/30 mx-auto mb-3" />
+                            <p className="text-sm text-muted-foreground">No appointments scheduled for today</p>
+                          </div>
+                        );
+                      })()}
                     </div>
                   </div>
                 </CardContent>

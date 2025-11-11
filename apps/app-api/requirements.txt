@@ -27,9 +27,13 @@ email-validator==2.2.0
 httpx==0.25.2
 requests==2.31.0
 
+# External Services
+twilio==9.7.0
+
 # Async Support
 asyncio==3.4.3
 aiofiles==23.2.1
+aiohttp==3.9.1
 
 # Testing
 pytest==7.4.3
@@ -62,6 +66,9 @@ python-docx==1.1.0
 # Web Scraping
 beautifulsoup4==4.12.2
 requests-html==0.10.0
+
+# LLM Providers
+google-generativeai>=0.8.5
 
 # Data Processing
 pandas==2.1.4

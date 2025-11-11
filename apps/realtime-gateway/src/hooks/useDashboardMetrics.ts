@@ -3,6 +3,12 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from './useAuth';
 import { useProfile } from './useProfile';
 
+export interface CallTypeMetric {
+  type: string;
+  count: number;
+  successRate: number;
+}
+
 export interface DashboardMetrics {
   newLeadsThisWeek: number;
   newLeadsChange: number;
@@ -12,6 +18,8 @@ export interface DashboardMetrics {
   dealsClosedChange: number;
   revenueGenerated: number;
   revenueChange: number;
+  callTypeBreakdown: CallTypeMetric[];
+  topCallType: string | null;
 }
 
 /**
@@ -32,6 +40,8 @@ export const useDashboardMetrics = () => {
     dealsClosedChange: 0,
     revenueGenerated: 0,
     revenueChange: 0,
+    callTypeBreakdown: [],
+    topCallType: null,
   });
   const [loading, setLoading] = useState(true);
   const { user } = useAuth();
@@ -188,6 +198,42 @@ export const useDashboardMetrics = () => {
         ? Math.round(((revenueGenerated - revenueLastMonth) / revenueLastMonth) * 100)
         : 0; // No baseline to compare - show 0% (no change calculated)
 
+      // Calculate call_type breakdown
+      const { data: callsWithTypes } = await supabase
+        .from('call_records')
+        .select('call_type, call_category')
+        .eq('user_id', user.id)
+        .gte('start_time', oneMonthAgo.toISOString())
+        .eq('recording_complete', true)
+        .not('call_type', 'is', null);
+
+      const callTypeMap = new Map<string, { total: number; scheduled: number }>();
+      
+      if (callsWithTypes) {
+        callsWithTypes.forEach(call => {
+          const callType = call.call_type || 'unknown';
+          if (!callTypeMap.has(callType)) {
+            callTypeMap.set(callType, { total: 0, scheduled: 0 });
+          }
+          const stats = callTypeMap.get(callType)!;
+          stats.total++;
+          if (call.call_category === 'consult_scheduled') {
+            stats.scheduled++;
+          }
+        });
+      }
+
+      const callTypeBreakdown: CallTypeMetric[] = Array.from(callTypeMap.entries())
+        .map(([type, stats]) => ({
+          type: type === 'unknown' ? 'Not Classified' : type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+          count: stats.total,
+          successRate: stats.total > 0 ? Math.round((stats.scheduled / stats.total) * 100) : 0
+        }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 5); // Top 5
+
+      const topCallType = callTypeBreakdown.length > 0 ? callTypeBreakdown[0].type : null;
+
       setMetrics({
         newLeadsThisWeek,
         newLeadsChange,
@@ -197,6 +243,8 @@ export const useDashboardMetrics = () => {
         dealsClosedChange,
         revenueGenerated,
         revenueChange,
+        callTypeBreakdown,
+        topCallType,
       });
     } catch (error) {
       console.error('Error calculating metrics:', error);

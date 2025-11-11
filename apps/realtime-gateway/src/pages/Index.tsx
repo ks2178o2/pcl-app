@@ -39,12 +39,18 @@ const Index = () => {
   }>({
     name: ''
   });
-  const [callsLimit, setCallsLimit] = useState<number>(10);
+  const [callsLimit, setCallsLimit] = useState<number>(() => {
+    try {
+      const raw = sessionStorage.getItem('homeCallsLimit');
+      return raw ? parseInt(raw) : 10;
+    } catch { return 10; }
+  });
   const navigate = useNavigate();
   const { activeCenter, needsCenterSelection, availableCenters, setActiveCenter, error: centerError } = useCenterSession();
 
   useEffect(() => {
     loadCalls(callsLimit);
+    try { sessionStorage.setItem('homeCallsLimit', String(callsLimit)); } catch {}
   }, [callsLimit]);
   useEffect(() => {
     if (!authLoading && !user) {
@@ -80,10 +86,16 @@ const Index = () => {
       alert('Please select a center before recording.');
       return;
     }
-    await addCall(audioBlob, duration, patientName, profile.salesperson_name, selectedPatient.id, activeCenter);
+    const call = await addCall(audioBlob, duration, patientName, profile.salesperson_name, selectedPatient.id, activeCenter);
     setSelectedPatient({
       name: ''
     }); // Clear the patient after recording
+
+    // Navigate to analysis screen if a valid id is returned
+    const newId = (call as any)?.id;
+    if (typeof newId === 'string' && newId.includes('-') && newId.length >= 32) {
+      navigate(`/analysis/${newId}`);
+    }
   };
   return <div className="min-h-screen bg-background">
       <OrganizationHeader />

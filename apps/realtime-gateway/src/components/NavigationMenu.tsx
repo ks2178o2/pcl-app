@@ -1,5 +1,5 @@
 import React from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -14,6 +14,7 @@ import { useUserRoles } from '@/hooks/useUserRoles';
 
 export const NavigationMenu = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { signOut } = useAuth();
   const { isLeader, isCoach, isSystemAdmin } = useUserRoles();
   const [open, setOpen] = React.useState(false);
@@ -25,6 +26,30 @@ export const NavigationMenu = () => {
 
   const handleNavigation = (path: string) => {
     setOpen(false);
+    try {
+      const from = location.pathname;
+      const leaving = (prefix: string) => from.startsWith(prefix) && !path.startsWith(prefix);
+      const pruneKeys = (pred: (k: string) => boolean) => {
+        const rm: string[] = [];
+        for (let i = 0; i < sessionStorage.length; i++) {
+          const k = sessionStorage.key(i) as string; if (!k) continue;
+          if (pred(k)) rm.push(k);
+        }
+        rm.forEach(k => sessionStorage.removeItem(k));
+      };
+      // Analysis module keys
+      if (leaving('/analysis')) {
+        pruneKeys(k => k.startsWith('callData:') || k.startsWith('signedAudioUrl:') || k.startsWith('analysis:') || k.startsWith('player:') || k === 'analysisFilters' || k.startsWith('analysisTab:') || k.startsWith('followupPlan:') || k.startsWith('followupMsgs:') || k.startsWith('followupTab:'));
+      }
+      // Search module keys
+      if (leaving('/search')) {
+        pruneKeys(k => k === 'searchFilters' || k.startsWith('searchCalls:') || k === 'searchScrollTop');
+      }
+      // Appointments/Schedule keys (if used later)
+      if (leaving('/appointments') || leaving('/schedule')) {
+        pruneKeys(k => k.startsWith('appointments:') || k === 'appointmentsScroll');
+      }
+    } catch {}
     navigate(path);
   };
 
@@ -32,7 +57,7 @@ export const NavigationMenu = () => {
     { label: 'Home', icon: Home, onClick: () => handleNavigation('/') },
     { label: 'Appointments', icon: Calendar, onClick: () => handleNavigation('/appointments') },
     { label: 'Voice Profile', icon: Mic, onClick: () => handleNavigation('/voice-profile') },
-    { label: 'Search Calls', icon: Search, onClick: () => handleNavigation('/search') },
+    { label: 'Call Analysis', icon: Search, onClick: () => handleNavigation('/search') },
     { label: 'Pt Pref.', icon: Settings, onClick: () => handleNavigation('/contact-preferences') },
     { label: 'Leaderboard', icon: Trophy, onClick: () => handleNavigation('/leaderboard') },
     { label: 'Security', icon: KeyRound, onClick: () => handleNavigation('/security-settings') },

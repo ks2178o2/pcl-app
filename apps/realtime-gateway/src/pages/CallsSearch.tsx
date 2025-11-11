@@ -24,6 +24,8 @@ interface CallRecord {
   transcript: string | null;
   audio_file_url: string | null;
   center_id: string | null;
+  call_category?: string;
+  call_type?: string;
 }
 
 export const CallsSearch: React.FC = () => {
@@ -45,16 +47,64 @@ export const CallsSearch: React.FC = () => {
   const [minDuration, setMinDuration] = useState('');
   const [maxDuration, setMaxDuration] = useState('');
   const [selectedCenter, setSelectedCenter] = useState('all');
+  const [filterCallCategory, setFilterCallCategory] = useState<string>('all');
+  const [filterCallType, setFilterCallType] = useState<string[]>([]);
+
+  // Restore filters and cached calls on mount
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem('searchFilters');
+      if (raw) {
+        const f = JSON.parse(raw);
+        if (typeof f.searchTerm === 'string') setSearchTerm(f.searchTerm);
+        if (typeof f.dateFrom === 'string') setDateFrom(f.dateFrom);
+        if (typeof f.dateTo === 'string') setDateTo(f.dateTo);
+        if (typeof f.sortBy === 'string') setSortBy(f.sortBy);
+        if (typeof f.sortOrder === 'string') setSortOrder(f.sortOrder);
+        if (typeof f.minDuration === 'string') setMinDuration(f.minDuration);
+        if (typeof f.maxDuration === 'string') setMaxDuration(f.maxDuration);
+        if (typeof f.selectedCenter === 'string') setSelectedCenter(f.selectedCenter);
+        if (typeof f.filterCallCategory === 'string') setFilterCallCategory(f.filterCallCategory);
+        if (Array.isArray(f.filterCallType)) setFilterCallType(f.filterCallType);
+      }
+      const cached = user ? sessionStorage.getItem(`searchCalls:${user.id}`) : null;
+      if (cached) {
+        const list = JSON.parse(cached) as CallRecord[];
+        setCalls(list);
+        setLoading(false);
+      }
+      const savedScroll = sessionStorage.getItem('searchScrollTop');
+      if (savedScroll) {
+        requestAnimationFrame(() => {
+          try { window.scrollTo(0, parseInt(savedScroll, 10) || 0); } catch {}
+        });
+      }
+    } catch {}
+  }, [user]);
+
+  // Persist filters and scroll
+  useEffect(() => {
+    try {
+      sessionStorage.setItem('searchFilters', JSON.stringify({
+        searchTerm, dateFrom, dateTo, sortBy, sortOrder, minDuration, maxDuration, selectedCenter,
+        filterCallCategory, filterCallType
+      }));
+      const onScroll = () => sessionStorage.setItem('searchScrollTop', String(window.scrollY || 0));
+      window.addEventListener('scroll', onScroll);
+      return () => window.removeEventListener('scroll', onScroll);
+    } catch {}
+  }, [searchTerm, dateFrom, dateTo, sortBy, sortOrder, minDuration, maxDuration, selectedCenter, filterCallCategory, filterCallType]);
 
   useEffect(() => {
     if (user) {
+      // If we already warmed from cache, refresh in background without flicker
       loadCalls();
     }
   }, [user]);
 
   useEffect(() => {
     applyFilters();
-  }, [calls, searchTerm, dateFrom, dateTo, sortBy, sortOrder, minDuration, maxDuration, selectedCenter]);
+  }, [calls, searchTerm, dateFrom, dateTo, sortBy, sortOrder, minDuration, maxDuration, selectedCenter, filterCallCategory, filterCallType]);
 
   const loadCalls = async () => {
     if (!user) return;
@@ -69,11 +119,20 @@ export const CallsSearch: React.FC = () => {
         .eq('user_id', user.id)
         .eq('recording_complete', true)
         .order('start_time', { ascending: false });
+      
+      // Ensure call_category and call_type are included
+      if (data) {
+        data.forEach(call => {
+          if (!call.hasOwnProperty('call_category')) call.call_category = undefined;
+          if (!call.hasOwnProperty('call_type')) call.call_type = undefined;
+        });
+      }
 
       if (error) throw error;
 
       console.log('✅ Loaded', data.length, 'calls for search');
       setCalls(data);
+      try { sessionStorage.setItem(`searchCalls:${user.id}`, JSON.stringify(data)); } catch {}
     } catch (error) {
       console.error('❌ Error loading calls for search:', error);
     } finally {
@@ -118,6 +177,18 @@ export const CallsSearch: React.FC = () => {
     // Filter by center
     if (selectedCenter && selectedCenter !== 'all') {
       filtered = filtered.filter(call => call.center_id === selectedCenter);
+    }
+
+    // Filter by call_category
+    if (filterCallCategory && filterCallCategory !== 'all') {
+      filtered = filtered.filter(call => call.call_category === filterCallCategory);
+    }
+
+    // Filter by call_type (multi-select)
+    if (filterCallType.length > 0) {
+      filtered = filtered.filter(call => 
+        call.call_type && filterCallType.includes(call.call_type)
+      );
     }
 
     // Sort results
@@ -222,55 +293,26 @@ export const CallsSearch: React.FC = () => {
         return;
       }
       
-      // Fetch the audio file and convert to base64
-      const response = await fetch(signedUrlData.signedUrl);
-      if (!response.ok) {
-        throw new Error('Failed to fetch audio file');
+      // Call FastAPI to transcribe this call by ID (backend fetches audio internally)
+      const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8001';
+      const { data: sess } = await supabase.auth.getSession();
+      const token = sess.session?.access_token;
+      const resp = await fetch(`${API_BASE_URL}/api/transcribe/call-record/${encodeURIComponent(call.id)}?enable_diarization=true`, {
+        method: 'POST',
+        headers: {
+          'Authorization': token ? `Bearer ${token}` : '',
+        },
+      });
+      const data = await resp.json().catch(() => null);
+      if (!resp.ok) {
+        console.error('Transcription failed:', data);
+        alert('Transcription failed. Please check the console for details.');
+      } else {
+        console.log('Transcription retry successful:', data);
+        setTimeout(() => {
+          window.location.reload();
+        }, 2000);
       }
-      
-      const audioBlob = await response.blob();
-      console.log('Audio blob size:', audioBlob.size);
-      
-      const reader = new FileReader();
-      
-      reader.onloadend = async () => {
-        try {
-          const base64Data = reader.result as string;
-          const base64Audio = base64Data.split(',')[1]; // Remove data URL prefix
-          
-          console.log('Base64 audio length:', base64Audio.length);
-
-          const { buildTranscriptionPayload } = await import('@/utils/transcriptionUtils');
-          
-          const payload = await buildTranscriptionPayload({
-            audioBase64: base64Audio,
-            callId: call.id,
-            salespersonName: 'You',
-            customerName: call.customer_name,
-            organizationId: (user as any)?.organization_id,
-          });
-
-          // Call the transcription service
-          const { data, error } = await supabase.functions.invoke('transcribe-audio-v2', {
-            body: payload,
-          });
-
-          if (error) {
-            console.error('Transcription failed:', error);
-            alert('Transcription failed. Please check the console for details.');
-          } else {
-            console.log('Transcription retry successful:', data);
-            // Auto-refresh the page to show updated transcription
-            setTimeout(() => {
-              window.location.reload();
-            }, 2000);
-          }
-        } catch (innerError) {
-          console.error('Error in transcription inner try block:', innerError);
-        }
-      };
-
-      reader.readAsDataURL(audioBlob);
     } catch (error) {
       console.error('Error retrying transcription:', error);
     }
@@ -308,17 +350,21 @@ export const CallsSearch: React.FC = () => {
     setMinDuration('');
     setMaxDuration('');
     setSelectedCenter('all');
+    setFilterCallCategory('all');
+    setFilterCallType([]);
     setSortBy('date');
     setSortOrder('desc');
   };
 
   const exportResults = () => {
     const csvContent = [
-      ['Patient Name', 'Date', 'Duration', 'Has Transcript'].join(','),
+      ['Patient Name', 'Date', 'Duration', 'Call Status', 'Call Type', 'Has Transcript'].join(','),
       ...filteredCalls.map(call => [
         call.customer_name,
         format(new Date(call.created_at), 'yyyy-MM-dd HH:mm'),
         formatDuration(call.duration_seconds),
+        call.call_category || 'N/A',
+        call.call_type ? call.call_type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()) : 'N/A',
         call.transcript ? 'Yes' : 'No'
       ].join(','))
     ].join('\n');
@@ -485,12 +531,60 @@ export const CallsSearch: React.FC = () => {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <CenterFilter 
               value={selectedCenter} 
               onChange={setSelectedCenter} 
               placeholder="All Centers"
             />
+            
+            {/* Call Category Filter */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Call Status</label>
+              <Select value={filterCallCategory} onValueChange={setFilterCallCategory}>
+                <SelectTrigger>
+                  <SelectValue placeholder="All Statuses" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Statuses</SelectItem>
+                  <SelectItem value="consult_scheduled">✅ Consult Scheduled</SelectItem>
+                  <SelectItem value="consult_not_scheduled">❌ Consult Not Scheduled</SelectItem>
+                  <SelectItem value="other_question">❓ Other Question</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Call Type Filter */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Call Type</label>
+              <Select 
+                value={filterCallType.length > 0 ? filterCallType[0] : 'all'} 
+                onValueChange={(value) => {
+                  if (value === 'all') {
+                    setFilterCallType([]);
+                  } else {
+                    setFilterCallType([value]);
+                  }
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder={filterCallType.length > 0 ? `${filterCallType.length} selected` : "All Types"} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Types</SelectItem>
+                  <SelectItem value="scheduling">Scheduling</SelectItem>
+                  <SelectItem value="pricing">Pricing</SelectItem>
+                  <SelectItem value="directions">Directions</SelectItem>
+                  <SelectItem value="billing">Billing</SelectItem>
+                  <SelectItem value="complaint">Complaint</SelectItem>
+                  <SelectItem value="transfer_to_office">Transfer to Office</SelectItem>
+                  <SelectItem value="general_question">General Question</SelectItem>
+                  <SelectItem value="reschedule">Reschedule</SelectItem>
+                  <SelectItem value="confirming_existing_appointment">Confirming Appointment</SelectItem>
+                  <SelectItem value="cancellation">Cancellation</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
 
           <div className="flex gap-2">
@@ -521,6 +615,8 @@ export const CallsSearch: React.FC = () => {
                   <TableHead>Customer</TableHead>
                   <TableHead>Date & Time</TableHead>
                   <TableHead>Duration</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Type</TableHead>
                   <TableHead>Transcript</TableHead>
                   <TableHead>Analysis</TableHead>
                   <TableHead>Actions</TableHead>
@@ -540,6 +636,30 @@ export const CallsSearch: React.FC = () => {
                         <Clock className="h-4 w-4 text-muted-foreground" />
                         {formatDuration(call.duration_seconds)}
                       </div>
+                    </TableCell>
+                    <TableCell>
+                      {call.call_category ? (
+                        <Badge variant={
+                          call.call_category === 'consult_scheduled' ? 'default' :
+                          call.call_category === 'consult_not_scheduled' ? 'secondary' :
+                          'outline'
+                        }>
+                          {call.call_category === 'consult_scheduled' ? '✅ Scheduled' :
+                           call.call_category === 'consult_not_scheduled' ? '❌ Not Scheduled' :
+                           call.call_category.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline">-</Badge>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {call.call_type ? (
+                        <Badge variant="outline">
+                          {call.call_type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline">-</Badge>
+                      )}
                     </TableCell>
                     <TableCell>
                       {call.transcript ? (

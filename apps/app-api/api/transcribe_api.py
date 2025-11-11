@@ -12,6 +12,7 @@ import uuid
 import requests
 from services.supabase_client import get_supabase_client
 from middleware.auth import get_current_user
+
 from middleware.auth import require_system_admin, require_org_admin
 
 router = APIRouter(prefix="/api/transcribe", tags=["transcribe"])
@@ -65,6 +66,7 @@ async def upload_audio_for_transcription(
     language: Optional[str] = Form(None),
     salesperson_name: Optional[str] = Form(None),
     customer_name: Optional[str] = Form(None),
+    enable_diarization: Optional[str] = Form("true"),  # Default to True, accept as string
     current_user: dict = Depends(get_current_user),
     background_tasks: BackgroundTasks = None,
 ):
@@ -86,7 +88,7 @@ async def upload_audio_for_transcription(
     
     try:
         # Validate file type
-        valid_extensions = ['.mp3', '.wav', '.m4a', '.webm', '.ogg', '.flac']
+        valid_extensions = ['.mp3', '.wav', '.m4a', '.webm', '.ogg']
         file_extension = os.path.splitext(file.filename)[1].lower()
         
         if file_extension not in valid_extensions:
@@ -190,6 +192,9 @@ async def upload_audio_for_transcription(
             logger.warning(f"Could not insert to transcription_queue table (may not exist): {e}")
             # Continue without database tracking if table doesn't exist
         
+        # Parse enable_diarization (Form data comes as string)
+        enable_diarization_bool = enable_diarization.lower() in ('true', '1', 'yes') if enable_diarization else True
+        
         # Start local background processing (portable across clouds)
         transcription_started = True
         try:
@@ -203,6 +208,7 @@ async def upload_audio_for_transcription(
                 salesperson_name or 'User',
                 customer_name or 'Customer',
                 language,
+                enable_diarization_bool,
             )
         except Exception as e:
             transcription_started = False
@@ -237,12 +243,22 @@ def _process_transcription_background(
     salesperson_name: str,
     customer_name: str,
     language: Optional[str],
+    enable_diarization: bool = True,
+    call_record_id: Optional[str] = None,  # Add optional call_record_id parameter
+    file_id: Optional[str] = None,  # Add optional file_id parameter for updating bulk_import_files status
 ):
     """Background task: download audio via signed URL, send to provider, update DB.
     This implementation simulates provider processing and writes progress to
     public.transcription_queue when available.
     """
+    print(f"🎬 _process_transcription_background CALLED: upload_id={upload_id}, provider={provider}, public_url_length={len(public_url) if public_url else 0}, call_record_id={call_record_id}")
+    print(f"🎬 DEBUG: call_record_id parameter value: {call_record_id}, type: {type(call_record_id)}")
+    logger.info(f"🎬 _process_transcription_background CALLED: upload_id={upload_id}, provider={provider}, call_record_id={call_record_id}")
     supabase = get_supabase_client()
+    
+    # Force flush stdout to ensure logs appear immediately
+    import sys
+    sys.stdout.flush()
 
     # Helper to update DB if table exists
     def _update(fields: dict):
@@ -252,12 +268,17 @@ def _process_transcription_background(
             pass
 
     # Mark processing
+    print(f"📝 Updating transcription_queue status to processing for upload_id={upload_id}")
     _update({"status": "processing", "progress": 5, "error": None})
 
     try:
         # Download audio (signed URL works for private bucket)
         if not public_url:
-            raise RuntimeError("missing signed/public URL for audio fetch")
+            error_msg = "missing signed/public URL for audio fetch"
+            print(f"❌ ERROR: {error_msg} for upload_id={upload_id}")
+            raise RuntimeError(error_msg)
+        
+        print(f"📥 Downloading audio from signed URL for upload_id={upload_id} (provider={provider})")
 
         with requests.get(public_url, stream=True, timeout=60) as r:
             r.raise_for_status()
@@ -272,24 +293,213 @@ def _process_transcription_background(
             provider_order = [provider]
 
         last_error = None
+        # Use call_record_id from parameter if provided, otherwise try to look it up
+        if call_record_id is None:
+            try:
+                # Try to get call_record_id from transcription_queue
+                print(f"🔍 Attempting to fetch call_record_id from transcription_queue for upload_id={upload_id}")
+                queue_result = supabase.from_('transcription_queue').select('call_record_id').eq('id', upload_id).maybe_single().execute()
+                if queue_result.data:
+                    call_record_id = queue_result.data.get('call_record_id')
+                    print(f"✅ Found call_record_id={call_record_id} from transcription_queue")
+                else:
+                    print(f"⚠️ No transcription_queue entry found for upload_id={upload_id} (will try call_id instead)")
+            except Exception as e:
+                print(f"⚠️ Error fetching call_record_id from transcription_queue: {e}")
+                # Try with call_id instead (different schema versions)
+                try:
+                    queue_result = supabase.from_('transcription_queue').select('call_id').eq('id', upload_id).maybe_single().execute()
+                    if queue_result.data:
+                        call_record_id = queue_result.data.get('call_id')
+                        print(f"✅ Found call_record_id={call_record_id} from transcription_queue (using call_id column)")
+                except Exception as e2:
+                    print(f"⚠️ Also failed to fetch call_id: {e2}")
+        else:
+            print(f"✅ Using call_record_id from parameter: {call_record_id}")
+            
+        if not call_record_id:
+            print(f"⚠️ WARNING: No call_record_id available - transcript will not be saved to call_records table")
+
         for p in provider_order:
             if enabled and p not in enabled:
+                print(f"⏭️ Skipping provider {p} (not enabled) for upload_id={upload_id}")
                 continue
             try:
+                print(f"🎙️ Calling transcription API: provider={p}, upload_id={upload_id}")
                 if p == 'assemblyai':
-                    transcript_text = _transcribe_with_assemblyai(public_url)
+                    result = _transcribe_with_assemblyai(public_url, enable_diarization)
                 elif p == 'deepgram':
-                    transcript_text = _transcribe_with_deepgram(public_url)
+                    result = _transcribe_with_deepgram(public_url, enable_diarization)
                 else:
+                    print(f"⏭️ Unknown provider {p}, skipping for upload_id={upload_id}")
                     continue
+                print(f"✅ Transcription API call completed for provider={p}, upload_id={upload_id}, transcript_length={len(result.get('transcript', '')) if result else 0}")
 
-                _update({
+                transcript_text = result.get('transcript', '')
+                diarization_segments = result.get('diarization_segments')
+                diarization_confidence = result.get('diarization_confidence')
+
+                update_fields = {
                     "status": "completed",
                     "progress": 100,
                     "transcript": transcript_text,
                     "provider": p,
                     "completed_at": datetime.utcnow().isoformat() + "Z",
-                })
+                }
+                
+                if diarization_segments:
+                    update_fields["diarization_segments"] = diarization_segments
+                if diarization_confidence is not None:
+                    update_fields["diarization_confidence"] = diarization_confidence
+
+                print(f"📝 Updating transcription_queue with completed status for upload_id={upload_id}")
+                _update(update_fields)
+
+                # Update call_records if we have a call_record_id
+                print(f"🔍 Checking for call_record_id: upload_id={upload_id}, call_record_id={call_record_id}, call_record_id type={type(call_record_id)}")
+                if call_record_id:
+                    print(f"✅ Found call_record_id={call_record_id}, updating call_records table with transcript (length: {len(transcript_text)} chars)")
+                    try:
+                        # Only update the transcript field - this is the core requirement
+                        # Other fields like transcription_provider, diarization_segments, diarization_confidence
+                        # may not exist in the call_records table schema
+                        call_update = {
+                            "transcript": transcript_text,
+                        }
+                        
+                        # Validate transcript is complete before saving
+                        if not transcript_text or len(transcript_text.strip()) < 10:
+                            logger.warning(f"⚠️ Transcript too short or empty (length: {len(transcript_text) if transcript_text else 0}), skipping database update")
+                            print(f"⚠️ TRANSCRIPTION INCOMPLETE: transcript too short (length: {len(transcript_text) if transcript_text else 0})")
+                            return  # Don't update database or trigger analysis
+                        
+                        print(f"📝 Updating call_records table: call_record_id={call_record_id}, transcript_length={len(transcript_text)}")
+                        print(f"📝 Update payload: transcript only (length={len(transcript_text)})")
+                        update_result = supabase.from_('call_records').update(call_update).eq('id', call_record_id).execute()
+                        if update_result.data:
+                            logger.info(f"✅ Successfully updated call_record {call_record_id} with transcript (length: {len(transcript_text)} chars, provider: {p})")
+                            print(f"✅ TRANSCRIPTION COMPLETE: call_record_id={call_record_id}, transcript_length={len(transcript_text)}, provider={p}")
+                            import sys
+                            sys.stdout.flush()
+                            
+                            # IMPORTANT: Only trigger analysis AFTER transcript is successfully saved to database
+                            # This ensures analysis runs with the complete, final transcript
+                            print(f"📊 Waiting 2 seconds before triggering analysis to ensure transcript is fully saved...")
+                            import time
+                            time.sleep(2)  # Brief pause to ensure database write is committed
+                            
+                            # Trigger analysis pipeline after successful transcription
+                            # This will categorize the call, detect objections, and analyze objection overcomes
+                            try:
+                                print(f"📊 Triggering analysis pipeline for call_record_id={call_record_id}")
+                                import asyncio
+                                from services.call_analysis_service import CallAnalysisService
+                                
+                                # Create analysis service
+                                analysis_service = CallAnalysisService(supabase)
+                                
+                                # Run analysis in async context
+                                async def run_analysis():
+                                    try:
+                                        # Determine provider from environment: Gemini (primary) -> OpenAI (secondary)
+                                        import os
+                                        provider = "gemini"  # Default to Gemini (primary)
+                                        if not (os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")):
+                                            if os.getenv("OPENAI_API_KEY"):
+                                                provider = "openai"
+                                            else:
+                                                provider = "heuristic"  # Last resort
+                                        
+                                        print(f"📊 Step 1: Categorizing call {call_record_id} with provider={provider}")
+                                        category_result = await analysis_service.categorize_call(
+                                            transcript=transcript_text,
+                                            call_record_id=call_record_id,
+                                            provider=provider
+                                        )
+                                        print(f"✅ Categorization complete: category={category_result.get('category')}, confidence={category_result.get('confidence')}")
+                                        
+                                        print(f"📊 Step 2: Detecting objections for call {call_record_id}")
+                                        objections = await analysis_service.detect_objections(
+                                            transcript=transcript_text,
+                                            call_record_id=call_record_id,
+                                            provider=provider
+                                        )
+                                        print(f"✅ Objection detection complete: found {len(objections) if objections else 0} objections")
+                                        
+                                        # If consult was scheduled, analyze objection overcome
+                                        # Note: call_type is already stored in call_record from categorization
+                                        if category_result.get("category") == "consult_scheduled" and objections:
+                                            print(f"📊 Step 3: Analyzing objection overcomes for call {call_record_id}")
+                                            call_type = category_result.get("call_type")
+                                            if call_type:
+                                                logger.info(f"Using call_type context '{call_type}' for objection overcome analysis")
+                                            await analysis_service.analyze_objection_overcome(
+                                                transcript=transcript_text,
+                                                call_record_id=call_record_id,
+                                                objections=objections,
+                                                provider=provider
+                                            )
+                                            print(f"✅ Objection overcome analysis complete")
+                                        
+                                        print(f"✅ ANALYSIS PIPELINE COMPLETE: call_record_id={call_record_id}")
+                                        
+                                        # Update bulk_import_files status to "completed" if file_id is provided
+                                        if file_id:
+                                            try:
+                                                supabase_for_update = get_supabase_client()
+                                                if supabase_for_update:
+                                                    update_result = supabase_for_update.table("bulk_import_files").update({
+                                                        "status": "completed"
+                                                    }).eq("id", file_id).execute()
+                                                    if update_result.data:
+                                                        logger.info(f"✅ Updated bulk_import_files {file_id} status to completed")
+                                                        print(f"✅ Updated bulk_import_files {file_id} status to completed")
+                                                    else:
+                                                        logger.warning(f"⚠️ No data returned when updating bulk_import_files {file_id}")
+                                            except Exception as file_update_error:
+                                                logger.warning(f"⚠️ Failed to update bulk_import_files status: {file_update_error}")
+                                                print(f"⚠️ Failed to update bulk_import_files status: {file_update_error}")
+                                    except Exception as analysis_error:
+                                        logger.error(f"❌ Error in analysis pipeline: {analysis_error}", exc_info=True)
+                                        print(f"❌ ANALYSIS ERROR: {analysis_error}")
+                                        import traceback
+                                        print(f"❌ Analysis traceback: {traceback.format_exc()}")
+                                        
+                                        # Update file status to failed if analysis errored and we have file_id
+                                        if file_id:
+                                            try:
+                                                supabase_for_update = get_supabase_client()
+                                                if supabase_for_update:
+                                                    supabase_for_update.table("bulk_import_files").update({
+                                                        "status": "failed",
+                                                        "error_message": f"Analysis failed: {str(analysis_error)[:500]}"
+                                                    }).eq("id", file_id).execute()
+                                            except Exception:
+                                                pass
+                                
+                                # Run analysis in a new event loop (since we're in a thread)
+                                loop = asyncio.new_event_loop()
+                                asyncio.set_event_loop(loop)
+                                try:
+                                    loop.run_until_complete(run_analysis())
+                                finally:
+                                    loop.close()
+                                    
+                            except Exception as trigger_error:
+                                logger.error(f"❌ Failed to trigger analysis pipeline: {trigger_error}", exc_info=True)
+                                print(f"❌ Failed to trigger analysis: {trigger_error}")
+                        else:
+                            logger.warning(f"⚠️ No data returned when updating call_record {call_record_id} with transcript")
+                            print(f"⚠️ TRANSCRIPTION UPDATE FAILED: call_record_id={call_record_id} - no data returned")
+                    except Exception as e:
+                        logger.error(f"❌ Failed to update call_records with transcript for {call_record_id}: {e}", exc_info=True)
+                        print(f"❌ ERROR updating call_records: {e}")
+                        import traceback
+                        print(f"❌ Traceback: {traceback.format_exc()}")
+                else:
+                    print(f"⚠️ No call_record_id found for upload_id={upload_id} - cannot update call_records table")
+                    print(f"⚠️ DEBUG: call_record_id is None or falsy. Parameter value was: {call_record_id}")
+
                 return
             except Exception as prov_exc:
                 last_error = str(prov_exc)
@@ -498,18 +708,25 @@ async def update_org_settings(payload: OrgSettingsPayload, user=Depends(require_
         raise HTTPException(status_code=500, detail='Failed to update org settings')
 
 
-def _transcribe_with_assemblyai(signed_url: str) -> str:
+def _transcribe_with_assemblyai(signed_url: str, enable_diarization: bool = True) -> dict:
+    print(f"🔵 Starting AssemblyAI transcription (signed_url_length={len(signed_url)}, diarization={enable_diarization})")
     # Accept both env var spellings for convenience
     api_key = os.getenv('ASSEMBLYAI_API_KEY') or os.getenv('ASSEMBLY_AI_API_KEY')
     if not api_key:
-        raise RuntimeError('ASSEMBLYAI_API_KEY not set')
+        error_msg = 'ASSEMBLYAI_API_KEY not set'
+        print(f"❌ ERROR: {error_msg}")
+        raise RuntimeError(error_msg)
+    print(f"✅ AssemblyAI API key found")
 
     # Create transcript job
     headers = {
         'authorization': api_key,
         'content-type': 'application/json',
     }
-    payload = { 'audio_url': signed_url }
+    payload = {
+        'audio_url': signed_url,
+        'speaker_labels': enable_diarization,
+    }
     r = requests.post('https://api.assemblyai.com/v2/transcript', json=payload, headers=headers, timeout=30)
     r.raise_for_status()
     job_id = r.json().get('id')
@@ -523,7 +740,28 @@ def _transcribe_with_assemblyai(signed_url: str) -> str:
         data = s.json()
         status = data.get('status')
         if status == 'completed':
-            return data.get('text') or ''
+            transcript_text = data.get('text') or ''
+            result = {'transcript': transcript_text}
+            
+            # Extract diarization segments if available
+            if enable_diarization and 'utterances' in data:
+                utterances = data.get('utterances', [])
+                diarization_segments = []
+                for utt in utterances:
+                    diarization_segments.append({
+                        'speaker': f"Speaker {utt.get('speaker', 'A')}",
+                        'text': utt.get('text', ''),
+                        'start': utt.get('start', 0) / 1000.0,  # Convert ms to seconds
+                        'end': utt.get('end', 0) / 1000.0,
+                        'confidence': utt.get('confidence', 1.0)
+                    })
+                result['diarization_segments'] = diarization_segments
+                # Calculate average confidence
+                if diarization_segments:
+                    avg_confidence = sum(seg.get('confidence', 1.0) for seg in diarization_segments) / len(diarization_segments)
+                    result['diarization_confidence'] = avg_confidence
+            
+            return result
         if status == 'error':
             raise RuntimeError(f"AssemblyAI error: {data.get('error')}")
         # sleep 2s
@@ -532,24 +770,84 @@ def _transcribe_with_assemblyai(signed_url: str) -> str:
     raise RuntimeError('AssemblyAI timeout')
 
 
-def _transcribe_with_deepgram(signed_url: str) -> str:
+def _transcribe_with_deepgram(signed_url: str, enable_diarization: bool = True) -> dict:
+    print(f"🟣 Starting Deepgram transcription (signed_url_length={len(signed_url)}, diarization={enable_diarization})")
     api_key = os.getenv('DEEPGRAM_API_KEY')
     if not api_key:
-        raise RuntimeError('DEEPGRAM_API_KEY not set')
+        error_msg = 'DEEPGRAM_API_KEY not set'
+        print(f"❌ ERROR: {error_msg}")
+        raise RuntimeError(error_msg)
+    print(f"✅ Deepgram API key found")
 
     headers = {
         'Authorization': f'Token {api_key}',
         'Content-Type': 'application/json'
     }
+    
+    # Build query parameters
+    params = ['smart_format=true']
+    if enable_diarization:
+        params.append('diarize=true')
+    
+    url = f'https://api.deepgram.com/v1/listen?{"&".join(params)}'
     payload = { 'url': signed_url }
-    r = requests.post('https://api.deepgram.com/v1/listen?smart_format=true', json=payload, headers=headers, timeout=60)
+    r = requests.post(url, json=payload, headers=headers, timeout=60)
     r.raise_for_status()
     data = r.json()
+    
     # Extract transcript from Deepgram JSON
     try:
-        return data['results']['channels'][0]['alternatives'][0]['transcript']
-    except Exception:
-        raise RuntimeError('Deepgram: unable to parse transcript')
+        result_data = data['results']['channels'][0]['alternatives'][0]
+        transcript_text = result_data.get('transcript', '')
+        result = {'transcript': transcript_text}
+        
+        # Extract diarization segments if available
+        if enable_diarization and 'words' in result_data:
+            words = result_data.get('words', [])
+            diarization_segments = []
+            current_speaker = None
+            current_segment = None
+            
+            for word in words:
+                speaker = word.get('speaker', 0)
+                text = word.get('word', '')
+                start = word.get('start', 0)
+                end = word.get('end', 0)
+                confidence = word.get('confidence', 1.0)
+                
+                if speaker != current_speaker:
+                    # Save previous segment
+                    if current_segment:
+                        diarization_segments.append(current_segment)
+                    # Start new segment
+                    current_speaker = speaker
+                    current_segment = {
+                        'speaker': f"Speaker {speaker}",
+                        'text': text,
+                        'start': start,
+                        'end': end,
+                        'confidence': confidence
+                    }
+                else:
+                    # Append to current segment
+                    if current_segment:
+                        current_segment['text'] += ' ' + text
+                        current_segment['end'] = end
+                        current_segment['confidence'] = (current_segment['confidence'] + confidence) / 2
+            
+            # Add final segment
+            if current_segment:
+                diarization_segments.append(current_segment)
+            
+            if diarization_segments:
+                result['diarization_segments'] = diarization_segments
+                # Calculate average confidence
+                avg_confidence = sum(seg.get('confidence', 1.0) for seg in diarization_segments) / len(diarization_segments)
+                result['diarization_confidence'] = avg_confidence
+        
+        return result
+    except Exception as e:
+        raise RuntimeError(f'Deepgram: unable to parse transcript: {str(e)}')
 
 @router.get("/status/{upload_id}", response_model=TranscriptionStatusResponse)
 async def get_transcription_status(
@@ -672,6 +970,174 @@ async def delete_transcription(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error deleting transcription: {str(e)}"
+        )
+
+
+@router.post("/call-record/{call_record_id}", response_model=TranscriptionUploadResponse)
+async def transcribe_call_record(
+    call_record_id: str,
+    enable_diarization: bool = True,  # Default to True
+    provider: Optional[str] = None,
+    background_tasks: BackgroundTasks = None,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Trigger transcription for an existing call record by ID.
+    Fetches the audio file from the call record and starts transcription.
+    """
+    supabase = get_supabase_client()
+    
+    if not supabase:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Storage service unavailable"
+        )
+    
+    try:
+        # Fetch call record from database
+        call_record_result = supabase.from_('call_records').select('*').eq('id', call_record_id).single().execute()
+        
+        if not call_record_result.data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Call record {call_record_id} not found"
+            )
+        
+        call_record = call_record_result.data
+        
+        # Verify user has access to this call record (check organization_id or center_id)
+        user_org_id = current_user.get('organization_id')
+        call_org_id = call_record.get('organization_id')
+        
+        # For now, allow if user's org matches or if org is None (admin)
+        # TODO: Add proper RLS/permission checks
+        if user_org_id and call_org_id and user_org_id != call_org_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied to this call record"
+            )
+        
+        # Get audio file URL
+        audio_file_url = call_record.get('audio_file_url')
+        if not audio_file_url:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Call record has no audio file"
+            )
+        
+        # Generate a signed URL for the audio file
+        try:
+            # Extract bucket and path from audio_file_url
+            # Format is typically: "bucket/path/to/file" or just "path/to/file"
+            signed_url_data = supabase.storage.from_('call-recordings').create_signed_url(
+                audio_file_url,
+                3600  # 1 hour expiry
+            )
+            
+            if signed_url_data.get('error'):
+                raise Exception(f"Failed to create signed URL: {signed_url_data.get('error')}")
+            
+            public_url = signed_url_data.get('signedURL') or signed_url_data.get('signedUrl')
+        except Exception as e:
+            logger.error(f"Error creating signed URL for audio file: {e}")
+            # Try to use the audio_file_url directly if it's already public
+            public_url = audio_file_url
+        
+        # Create upload_id for tracking
+        upload_id = str(uuid.uuid4())
+        
+        # Get file extension from URL
+        file_extension = os.path.splitext(audio_file_url)[1].lower() or '.webm'
+        
+        # Determine provider
+        if not provider:
+            provider_order, _ = _get_provider_settings(supabase, upload_id)
+            provider = provider_order[0] if provider_order else 'deepgram'
+        
+        # Get customer and salesperson names from call record
+        customer_name = call_record.get('customer_name') or 'Customer'
+        salesperson_name = call_record.get('salesperson_name') or current_user.get('full_name') or current_user.get('email', 'User')
+        
+        # Create transcription_queue entry
+        transcription_queue_data = {
+            'id': upload_id,
+            'user_id': current_user['user_id'],
+            'organization_id': user_org_id or call_org_id,
+            'storage_path': audio_file_url,
+            'file_name': os.path.basename(audio_file_url),
+            'status': 'queued',
+            'progress': 0,
+            'provider': provider,
+            'call_record_id': call_record_id,  # Link to call record
+        }
+        
+        try:
+            supabase.from_('transcription_queue').insert(transcription_queue_data).execute()
+        except Exception as e:
+            logger.warning(f"Failed to insert into transcription_queue (table may not exist): {e}")
+        
+        # Update call record with upload_id in vendor_insights
+        try:
+            vendor_insights = call_record.get('vendor_insights') or {}
+            if not isinstance(vendor_insights, dict):
+                vendor_insights = {}
+            
+            vendor_insights['transcription_upload_id'] = upload_id
+            supabase.from_('call_records').update({
+                'vendor_insights': vendor_insights,
+                'transcript': 'Transcribing audio...'
+            }).eq('id', call_record_id).execute()
+        except Exception as e:
+            logger.warning(f"Failed to update call record vendor_insights: {e}")
+        
+        # Start transcription in background
+        transcription_started = False
+        try:
+            # Use background task to process transcription (non-blocking)
+            if background_tasks:
+                background_tasks.add_task(
+                    _process_transcription_background,
+                    upload_id,
+                    audio_file_url,
+                    public_url,
+                    provider,
+                    file_extension,
+                    salesperson_name,
+                    customer_name,
+                    None,  # language
+                    enable_diarization  # Pass diarization flag
+                )
+            else:
+                # Fallback: run in thread if BackgroundTasks not available
+                import threading
+                thread = threading.Thread(
+                    target=_process_transcription_background,
+                    args=(upload_id, audio_file_url, public_url, provider, file_extension, salesperson_name, customer_name, None, enable_diarization),
+                    daemon=True
+                )
+                thread.start()
+            transcription_started = True
+        except Exception as e:
+            transcription_started = False
+            logger.error(f"Failed to schedule background transcription: {e}")
+        
+        return TranscriptionUploadResponse(
+            success=True,
+            upload_id=upload_id,
+            storage_path=audio_file_url,
+            file_name=os.path.basename(audio_file_url),
+            file_size=0,  # Size unknown without fetching
+            transcript_job_id=upload_id if transcription_started else None,
+            message="Transcription job queued successfully." if transcription_started else "Transcription will start shortly."
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error transcribing call record: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error transcribing call record: {str(e)}"
         )
 
 

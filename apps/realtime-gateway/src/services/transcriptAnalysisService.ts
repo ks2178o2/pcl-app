@@ -159,26 +159,44 @@ export type LLMProvider = 'gemini' | 'openai';
 export type AnalysisEngine = 'auto' | 'vendor' | 'llm';
 
 class TranscriptAnalysisService {
-  private async callLLM(prompt: string): Promise<string> {
+  private async callLLM(prompt: string, provider?: LLMProvider): Promise<string> {
     const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8001';
     const { supabase } = await import('@/integrations/supabase/client');
     const { data: sessionData } = await supabase.auth.getSession();
     const token = sessionData?.session?.access_token;
-    const resp = await fetch(`${API_BASE_URL}/api/analysis/analyze`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      body: JSON.stringify({ prompt }),
-    });
-    if (!resp.ok) {
-      const text = await resp.text();
-      throw new Error(`Backend analysis failed: ${resp.status} ${text}`);
+    
+    const url = `${API_BASE_URL}/api/analysis/analyze`;
+    const payload = { prompt, ...(provider ? { provider } : {}) };
+    
+    console.log(`[callLLM] Sending request to ${url}`, { provider, promptLength: prompt.length });
+    
+    try {
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(payload),
+      });
+      
+      console.log(`[callLLM] Response status: ${resp.status}`);
+      
+      if (!resp.ok) {
+        const text = await resp.text();
+        console.error(`[callLLM] Error response:`, text);
+        throw new Error(`Backend analysis failed: ${resp.status} ${text}`);
+      }
+      
+      const json = await resp.json();
+      console.log(`[callLLM] Success, got analysis from provider:`, json.provider);
+      
+      if (!json?.analysis) throw new Error('No analysis returned');
+      return json.analysis as string;
+    } catch (error) {
+      console.error(`[callLLM] Fetch error:`, error);
+      throw error;
     }
-    const json = await resp.json();
-    if (!json?.analysis) throw new Error('No analysis returned');
-    return json.analysis as string;
   }
 
   private async callWithFallback(prompt: string): Promise<{ analysis: string, provider: string }> {
@@ -208,17 +226,30 @@ class TranscriptAnalysisService {
 
   async getStoredAnalysis(callRecordId: string): Promise<CallAnalysis | null> {
     try {
+      // Session cache first
+      try {
+        const cached = sessionStorage.getItem(`storedAnalysis:${callRecordId}`);
+        if (cached) {
+          return JSON.parse(cached) as CallAnalysis;
+        }
+      } catch {}
+
       const { supabase } = await import('@/integrations/supabase/client');
+      // Tolerant fetch: newest row only, avoid single()/maybeSingle() coercion errors
       const { data, error } = await supabase
         .from('call_analyses')
-        .select('analysis_data')
+        .select('analysis_data, created_at')
         .eq('call_record_id', callRecordId)
-        .maybeSingle();
+        .order('created_at', { ascending: false })
+        .limit(1);
 
       if (error) throw error;
-      if (!data) return null;
+      const row = Array.isArray(data) && data.length > 0 ? data[0] : null;
+      if (!row) return null;
 
-      return data.analysis_data as unknown as CallAnalysis;
+      const analysis = row.analysis_data as unknown as CallAnalysis;
+      try { sessionStorage.setItem(`storedAnalysis:${callRecordId}`, JSON.stringify(analysis)); } catch {}
+      return analysis;
     } catch (error) {
       console.error('Error getting stored analysis:', error);
       return null;
@@ -232,9 +263,16 @@ class TranscriptAnalysisService {
       // Extract metrics for database columns
       const extractedMetrics = this.extractMetricsFromAnalysis(analysis);
 
+      // Delete existing analyses for this call to prevent duplicates (no unique constraint exists)
+      await supabase
+        .from('call_analyses')
+        .delete()
+        .eq('call_record_id', callRecordId);
+
+      // Insert new analysis
       const { error } = await supabase
         .from('call_analyses')
-        .upsert({
+        .insert({
           call_record_id: callRecordId,
           user_id: userId,
           analysis_data: analysis as any,
@@ -583,7 +621,24 @@ ${vendorContext ? 'Incorporate the vendor insights provided above into your anal
 
     try {
       const { analysis: response, provider } = await this.callWithFallback(prompt);
-      const parsedAnalysis = JSON.parse(response) as CallAnalysis;
+      // Robust JSON parsing: handle ```json fences or extra prose around the JSON
+      const raw = (response || '').toString().trim();
+      const withoutFences = raw
+        .replace(/^```(?:json)?\s*/i, '')
+        .replace(/```\s*$/i, '')
+        .trim();
+      let parsedAnalysis: any;
+      try {
+        parsedAnalysis = JSON.parse(withoutFences);
+      } catch (inner) {
+        const start = withoutFences.indexOf('{');
+        const end = withoutFences.lastIndexOf('}');
+        if (start !== -1 && end !== -1 && end > start) {
+          parsedAnalysis = JSON.parse(withoutFences.substring(start, end + 1));
+        } else {
+          throw inner;
+        }
+      }
       
       const engineSuffix = analysisEngine === 'auto' && vendorInsights ? ` + ${vendorInsights.provider}` : '';
       const modelName = provider === 'gemini' ? `gemini-2.0-flash-exp${engineSuffix}` : `gpt-4.1-2025-04-14${engineSuffix}`;

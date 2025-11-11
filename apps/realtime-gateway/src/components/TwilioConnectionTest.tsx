@@ -13,15 +13,18 @@ export const TwilioConnectionTest: React.FC = () => {
     setResult(null);
     
     try {
-      const { data, error } = await supabase.functions.invoke('test-twilio-connection');
-      
-      if (error) {
-        setResult({ success: false, message: `Error: ${error.message}` });
+      const { data: { session } } = await supabase.auth.getSession();
+      const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8001';
+      const resp = await fetch(`${API_BASE_URL}/api/twilio/test-connection`, {
+        headers: {
+          Authorization: session?.access_token ? `Bearer ${session.access_token}` : ''
+        }
+      });
+      const data = await resp.json().catch(() => null);
+      if (!resp.ok) {
+        setResult({ success: false, message: data?.detail || resp.statusText });
       } else {
-        setResult({ 
-          success: data.success, 
-          message: data.success ? 'Twilio connection successful!' : data.message 
-        });
+        setResult({ success: !!data?.success, message: data?.success ? 'Twilio connection successful!' : (data?.message || 'Failed') });
       }
     } catch (error) {
       setResult({ 

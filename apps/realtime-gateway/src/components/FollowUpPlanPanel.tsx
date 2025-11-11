@@ -96,43 +96,121 @@ export const FollowUpPlanPanel: React.FC<FollowUpPlanPanelProps> = ({
   const { user } = useAuth();
   const { preferences } = useContactPreferences(callId);
 
+  // Restore from cache immediately; refresh in background
   useEffect(() => {
-    if (user && callId) {
+    try {
+      const cachedPlan = sessionStorage.getItem(`followupPlan:${callId}`);
+      const cachedMsgs = sessionStorage.getItem(`followupMsgs:${callId}`);
+      if (cachedPlan) setFollowUpPlan(JSON.parse(cachedPlan));
+      if (cachedMsgs) setMessages(JSON.parse(cachedMsgs));
+      if (cachedPlan || cachedMsgs) setIsLoading(false);
+    } catch {}
+  }, [callId]);
+
+  // Extract stable user ID to prevent unnecessary re-fetches
+  const userId = user?.id;
+
+  useEffect(() => {
+    if (userId && callId) {
       loadFollowUpPlan();
     }
-  }, [user, callId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId, callId]);
 
   const loadFollowUpPlan = async () => {
+    if (!userId || !callId) return;
+    
     try {
       setIsLoading(true);
       
-      // Load existing follow-up plan
+      // Load existing follow-up plan - use maybeSingle() to avoid 406 errors
       const { data: planData, error: planError } = await supabase
         .from('follow_up_plans')
         .select('*')
         .eq('call_record_id', callId)
-        .eq('user_id', user!.id)
-        .single();
+        .eq('user_id', userId)
+        .maybeSingle();
 
+      // Only log actual errors (not expected "no rows" cases)
       if (planError && planError.code !== 'PGRST116') {
-        throw planError;
+        console.error('Error loading follow-up plan:', planError);
+        // Don't throw - just continue without plan data
       }
 
       if (planData) {
-        setFollowUpPlan(planData);
+        // Merge plan_data JSONB fields into the plan object if individual columns don't exist
+        const mergedPlan = { ...planData };
+        if (planData.plan_data && typeof planData.plan_data === 'object') {
+          // Extract fields from plan_data JSONB if individual columns are missing
+          const planDataObj = planData.plan_data;
+          if (!mergedPlan.customer_urgency && planDataObj.customer_urgency) {
+            mergedPlan.customer_urgency = planDataObj.customer_urgency;
+          }
+          if (!mergedPlan.priority_score && planDataObj.priority_score !== undefined) {
+            mergedPlan.priority_score = planDataObj.priority_score;
+          }
+          if (!mergedPlan.strategy_type && planDataObj.strategy_type) {
+            mergedPlan.strategy_type = planDataObj.strategy_type;
+          }
+          if (!mergedPlan.recommended_timing && planDataObj.recommended_timing) {
+            mergedPlan.recommended_timing = planDataObj.recommended_timing;
+          }
+          if (!mergedPlan.next_action && planDataObj.next_action) {
+            mergedPlan.next_action = planDataObj.next_action;
+          }
+          if (!mergedPlan.reasoning && planDataObj.reasoning) {
+            mergedPlan.reasoning = planDataObj.reasoning;
+          }
+        }
+        
+        setFollowUpPlan(mergedPlan);
+        try { sessionStorage.setItem(`followupPlan:${callId}`, JSON.stringify(mergedPlan)); } catch {}
         
         // Load associated messages
         const { data: messagesData, error: messagesError } = await supabase
           .from('follow_up_messages')
           .select('*')
           .eq('follow_up_plan_id', planData.id)
-          .eq('user_id', user!.id);
+          .eq('user_id', userId);
 
         if (messagesError) {
-          throw messagesError;
+          console.error('Error loading follow-up messages:', messagesError);
+          // Don't throw - just continue without messages
         }
 
-        setMessages(messagesData || []);
+        // Merge message_data JSONB fields into message objects if individual columns don't exist
+        const mergedMessages = (messagesData || []).map((msg: any) => {
+          const mergedMsg = { ...msg };
+          if (msg.message_data && typeof msg.message_data === 'object') {
+            // Extract fields from message_data JSONB if individual columns are missing
+            const msgDataObj = msg.message_data;
+            if (!mergedMsg.channel_type && msgDataObj.channel_type) {
+              mergedMsg.channel_type = msgDataObj.channel_type;
+            }
+            if (!mergedMsg.message_content && msgDataObj.message_content) {
+              mergedMsg.message_content = msgDataObj.message_content;
+            }
+            if (!mergedMsg.subject_line && msgDataObj.subject_line) {
+              mergedMsg.subject_line = msgDataObj.subject_line;
+            }
+            if (!mergedMsg.call_to_action && msgDataObj.call_to_action) {
+              mergedMsg.call_to_action = msgDataObj.call_to_action;
+            }
+            if (!mergedMsg.personalization_notes && msgDataObj.personalization_notes) {
+              mergedMsg.personalization_notes = msgDataObj.personalization_notes;
+            }
+            if (!mergedMsg.tone && msgDataObj.tone) {
+              mergedMsg.tone = msgDataObj.tone;
+            }
+            if (!mergedMsg.estimated_send_time && msgDataObj.estimated_send_time) {
+              mergedMsg.estimated_send_time = msgDataObj.estimated_send_time;
+            }
+          }
+          return mergedMsg;
+        });
+
+        setMessages(mergedMessages);
+        try { sessionStorage.setItem(`followupMsgs:${callId}`, JSON.stringify(mergedMessages)); } catch {}
       }
     } catch (error) {
       console.error('Error loading follow-up plan:', error);
@@ -153,19 +231,31 @@ export const FollowUpPlanPanel: React.FC<FollowUpPlanPanelProps> = ({
     try {
       setIsGenerating(true);
       
-      const { data, error } = await supabase.functions.invoke('generate-followup-plan', {
-        body: {
+      const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8001';
+      const { data: sess } = await supabase.auth.getSession();
+      const token = sess.session?.access_token;
+      
+      const resp = await fetch(`${API_BASE_URL}/api/followup/generate`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': token ? `Bearer ${token}` : '',
+        },
+        body: JSON.stringify({
           callRecordId: callId,
           transcript,
           analysisData,
           customerName,
           salespersonName,
-          provider: useProvider
-        }
+          provider: useProvider === 'auto' ? null : useProvider
+        }),
       });
 
-      if (error) {
-        throw error;
+      const data = await resp.json().catch(() => null);
+      
+      if (!resp.ok) {
+        const errorMsg = data?.detail || data?.error || resp.statusText || 'Failed to generate follow-up plan';
+        throw new Error(errorMsg);
       }
 
       if (data.error) {
@@ -299,7 +389,11 @@ export const FollowUpPlanPanel: React.FC<FollowUpPlanPanelProps> = ({
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <Tabs defaultValue="strategy" className="w-full">
+        <Tabs
+          defaultValue={(typeof window !== 'undefined') ? (sessionStorage.getItem(`followupTab:${callId}`) || 'strategy') : 'strategy'}
+          onValueChange={(v) => { try { sessionStorage.setItem(`followupTab:${callId}`, v); } catch {} }}
+          className="w-full"
+        >
           <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="strategy">Strategy</TabsTrigger>
             <TabsTrigger value="messages">Timeline ({messages.length})</TabsTrigger>
@@ -315,28 +409,36 @@ export const FollowUpPlanPanel: React.FC<FollowUpPlanPanelProps> = ({
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <div className="flex items-center gap-2">
-                  <Badge className={getUrgencyColor(followUpPlan.customer_urgency)}>
-                    {followUpPlan.customer_urgency.toUpperCase()} URGENCY
-                  </Badge>
-                  <Badge variant="outline">
-                    Priority: {followUpPlan.priority_score}/10
-                  </Badge>
+                  {followUpPlan.customer_urgency && (
+                    <Badge className={getUrgencyColor(followUpPlan.customer_urgency)}>
+                      {followUpPlan.customer_urgency.toUpperCase()} URGENCY
+                    </Badge>
+                  )}
+                  {followUpPlan.priority_score !== undefined && (
+                    <Badge variant="outline">
+                      Priority: {followUpPlan.priority_score}/10
+                    </Badge>
+                  )}
                 </div>
                 
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Clock className="h-4 w-4" />
-                  {getTimingText(followUpPlan.recommended_timing)}
-                </div>
+                {followUpPlan.recommended_timing && (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Clock className="h-4 w-4" />
+                    {getTimingText(followUpPlan.recommended_timing)}
+                  </div>
+                )}
                 
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  {getChannelIcon(followUpPlan.strategy_type)}
-                  {followUpPlan.strategy_type.charAt(0).toUpperCase() + followUpPlan.strategy_type.slice(1)}
-                </div>
+                {followUpPlan.strategy_type && (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    {getChannelIcon(followUpPlan.strategy_type)}
+                    {followUpPlan.strategy_type.charAt(0).toUpperCase() + followUpPlan.strategy_type.slice(1)}
+                  </div>
+                )}
               </div>
               
               <div className="space-y-2">
                 <h4 className="font-medium">Next Action</h4>
-                <p className="text-sm text-muted-foreground">{followUpPlan.next_action}</p>
+                <p className="text-sm text-muted-foreground">{followUpPlan.next_action || 'No action specified'}</p>
               </div>
             </div>
             
@@ -344,7 +446,7 @@ export const FollowUpPlanPanel: React.FC<FollowUpPlanPanelProps> = ({
             
             <div className="space-y-2">
               <h4 className="font-medium">Strategy Reasoning</h4>
-              <p className="text-sm text-muted-foreground">{followUpPlan.reasoning}</p>
+              <p className="text-sm text-muted-foreground">{followUpPlan.reasoning || 'No reasoning provided'}</p>
             </div>
             
             {followUpPlan.compliance_notes && (

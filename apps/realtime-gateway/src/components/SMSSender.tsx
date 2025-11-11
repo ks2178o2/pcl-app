@@ -51,21 +51,25 @@ export const SMSSender = ({
         throw new Error('Not authenticated');
       }
 
-      const response = await supabase.functions.invoke('send-sms', {
-        body: {
+      const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8001';
+      const resp = await fetch(`${API_BASE_URL}/api/twilio/send-sms`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`
+        },
+        body: JSON.stringify({
           callRecordId,
           recipientPhone: formData.recipientPhone,
           recipientName: customerName,
           message: formData.message,
           messageType: 'follow_up'
-        },
-        headers: {
-          Authorization: `Bearer ${session.access_token}`
-        }
+        })
       });
-
-      if (response.error) {
-        throw response.error;
+      const data = await resp.json().catch(() => null);
+      if (!resp.ok || data?.success !== true) {
+        const msg = data?.detail || data?.error || resp.statusText || 'Failed to send SMS';
+        throw new Error(msg);
       }
 
       toast({

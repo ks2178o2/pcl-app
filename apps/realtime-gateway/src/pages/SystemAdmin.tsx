@@ -9,11 +9,12 @@ import RAGFeatureManagement from '@/components/admin/RAGFeatureManagement';
 import { EnhancedContextManagement } from '@/components/admin/EnhancedContextManagement';
 import { EnhancedUploadManager } from '@/components/admin/EnhancedUploadManager';
 import { RAGPermissionsManager } from '@/components/admin/RAGPermissionsManager';
+import { AnalysisSettingsManagement } from '@/components/admin/AnalysisSettingsManagement';
 import { useUserRoles } from '@/hooks/useUserRoles';
 import { useSecureAdminAccess } from '@/hooks/useSecureAdminAccess';
 import { useOrganizationData } from '@/hooks/useOrganizationData';
 import { Navigate } from 'react-router-dom';
-import { Shield, Building, Users, BarChart3, Settings2, Database, Lock } from 'lucide-react';
+import { Shield, Building, Users, BarChart3, Settings2, Database, Lock, Brain } from 'lucide-react';
 import SystemCheck from './SystemCheck';
 
 export const SystemAdmin = () => {
@@ -93,7 +94,7 @@ export const SystemAdmin = () => {
       </div>
 
       <Tabs defaultValue="organizations" className="space-y-6">
-        <TabsList className={`grid w-full ${canManageSystem ? 'grid-cols-9' : 'grid-cols-6'}`}>
+        <TabsList className={`grid w-full ${canManageSystem ? 'grid-cols-10' : 'grid-cols-7'}`}>
           {canManageSystem && (
             <TabsTrigger value="organizations" className="flex items-center gap-2">
               <Building className="h-4 w-4" />
@@ -121,6 +122,10 @@ export const SystemAdmin = () => {
           <TabsTrigger value="knowledge-base" className="flex items-center gap-2">
             <Database className="h-4 w-4" />
             Knowledge Base
+          </TabsTrigger>
+          <TabsTrigger value="analysis-settings" className="flex items-center gap-2">
+            <Brain className="h-4 w-4" />
+            Analysis
           </TabsTrigger>
           <TabsTrigger value="timeout-settings" className="flex items-center gap-2">
             <Shield className="h-4 w-4" />
@@ -199,6 +204,10 @@ export const SystemAdmin = () => {
 
         <TabsContent value="rag-permissions">
           <RAGPermissionsManager />
+        </TabsContent>
+
+        <TabsContent value="analysis-settings">
+          <AnalysisSettingsManagement />
         </TabsContent>
 
         <TabsContent value="knowledge-base">

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from './useAuth';
 
@@ -16,21 +16,44 @@ export const useProfile = () => {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const { user } = useAuth();
+  const lastUserIdRef = useRef<string | null>(null);
+  const fetchingRef = useRef(false);
 
   useEffect(() => {
-    const fetchProfile = async () => {
-      if (!user) {
+    // Skip if no user or if we've already fetched for this user
+    if (!user) {
+      if (profile !== null || loading) {
         setProfile(null);
         setLoading(false);
-        return;
       }
+      lastUserIdRef.current = null;
+      fetchingRef.current = false;
+      return;
+    }
 
+    // Skip if already fetching
+    if (fetchingRef.current) {
+      return;
+    }
+
+    // Skip if we've already loaded profile for this user ID
+    if (lastUserIdRef.current === user.id && profile !== null) {
+      return;
+    }
+
+    // Only fetch if user ID changed
+    if (lastUserIdRef.current === user.id) {
+      return;
+    }
+
+    const fetchProfile = async () => {
+      fetchingRef.current = true;
+      lastUserIdRef.current = user.id;
+      
       setLoading(true);
-      console.log('Fetching profile for user:', user.id, user.email);
       try {
         // Try to get profile data from user metadata first
         const userMetadata = user.user_metadata;
-        console.log('User metadata:', userMetadata);
         if (userMetadata?.salesperson_name) {
           // Create a profile object from user metadata
           const profileData = {
@@ -41,9 +64,9 @@ export const useProfile = () => {
             created_at: user.created_at,
             updated_at: user.updated_at
           };
-          console.log('Created profile from metadata:', profileData);
           setProfile(profileData);
           setLoading(false);
+          fetchingRef.current = false;
           return;
         }
 
@@ -65,10 +88,8 @@ export const useProfile = () => {
             created_at: user.created_at,
             updated_at: user.updated_at
           };
-          console.log('Created fallback profile:', profileData);
           setProfile(profileData);
         } else {
-          console.log('Profile fetched from database:', data);
           setProfile(data);
         }
       } catch (error) {
@@ -82,15 +103,17 @@ export const useProfile = () => {
           created_at: user.created_at,
           updated_at: user.updated_at
         };
-        console.log('Created fallback profile from catch block:', profileData);
         setProfile(profileData);
       } finally {
         setLoading(false);
+        fetchingRef.current = false;
       }
     };
 
     fetchProfile();
-  }, [user]);
+    // Only depend on user.id to prevent refetching when user object reference changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
 
   const refetch = () => {
     // This will trigger the useEffect to re-run

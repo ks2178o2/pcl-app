@@ -1143,14 +1143,6 @@ class TestOrganizationHierarchyAPIClient:
         # Set count as integer directly
         result.count = 1
         
-        # Setup count result - use same pattern as working tests
-        count_result = Mock()
-        # Use object.__setattr__ to bypass Mock's attribute handling
-        object.__setattr__(count_result, 'count', 1)
-        
-        # Verify it's actually an int
-        assert isinstance(count_result.count, int), "Count must be int"
-        
         # Setup main query chain
         mock_table = Mock()
         mock_select = Mock()
@@ -1163,7 +1155,16 @@ class TestOrganizationHierarchyAPIClient:
         mock_eq.range.return_value = mock_range
         mock_range.execute = mock_execute
         
-        # Setup count query chain - return object with integer count
+        # Setup count result - use Mock like working test, but ensure count is properly set
+        count_result = Mock()
+        # Use spec to limit Mock's behavior, or set count directly
+        # The key is that count_result.count must be an integer, not a Mock
+        count_result.count = 1
+        # Force count to be an int by using object.__setattr__ if needed
+        # But Mock should handle this fine
+        
+        # Setup count query chain - use same pattern as working test
+        # The count query is: supabase.from_('organizations').select('count', count='exact').eq('parent_organization_id', org_id).execute()
         count_execute = Mock(return_value=count_result)
         count_eq = Mock(execute=count_execute)
         count_select = Mock(eq=Mock(return_value=count_eq))
@@ -1185,13 +1186,16 @@ class TestOrganizationHierarchyAPIClient:
         feature_table = Mock(select=Mock(return_value=feature_select))
         
         # Track calls to ensure proper sequencing
+        # Call order: 1) main org query, 2) feature stats (exception), 3) feature stats (exception), 4) count query
         call_counter = {'i': 0}
         def from_side_effect(table_name):
             call_counter['i'] += 1
             if table_name == 'organizations':
                 if call_counter['i'] == 1:
+                    # First call: main query
                     return mock_table
-                elif call_counter['i'] == 2:
+                else:
+                    # Later calls: count query (after feature stats)
                     return count_table
             elif table_name == 'organization_rag_toggles':
                 # All feature stats queries should raise exception
@@ -1204,7 +1208,7 @@ class TestOrganizationHierarchyAPIClient:
         with TestClient(app) as client:
             response = client.get("/api/v1/orgs/parent-1/children?include_feature_stats=true")
             # Should still succeed (200 OK), exception caught and defaults set
-            assert response.status_code == 200
+            assert response.status_code == 200, f"Expected 200, got {response.status_code}. Response: {response.json() if response.status_code != 200 else 'OK'}"
             body = response.json()
             assert body['success'] is True
             assert len(body['data']) == 1

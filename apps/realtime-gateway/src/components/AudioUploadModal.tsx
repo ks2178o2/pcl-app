@@ -64,11 +64,11 @@ export const AudioUploadModal: React.FC<AudioUploadModalProps> = ({
     // Check if large WAV needs conversion
     const needsConversion = shouldConvertAudio(file, file.name);
     
-    // For large WAVs, validate size after potential conversion
+    // For files that don't need conversion, validate size against backend limit
     if (!needsConversion) {
-      const maxSize = 50 * 1024 * 1024; // 50MB
+      const maxSize = 100 * 1024 * 1024; // 100MB backend limit
       if (file.size > maxSize) {
-        setUploadError('File size must be less than 50MB');
+        setUploadError('File size must be less than 100MB');
         return;
       }
     }
@@ -78,6 +78,15 @@ export const AudioUploadModal: React.FC<AudioUploadModalProps> = ({
 
   const handleUpload = async () => {
     if (!selectedFile || !profile) return;
+
+    // Log file information upfront
+    console.log('📁 Starting upload process:', {
+      fileName: selectedFile.name,
+      fileType: selectedFile.type,
+      originalSize: selectedFile.size,
+      originalSizeFormatted: formatFileSize(selectedFile.size),
+      lastModified: new Date(selectedFile.lastModified).toISOString()
+    });
 
     setUploading(true);
     setUploadError('');
@@ -114,7 +123,7 @@ export const AudioUploadModal: React.FC<AudioUploadModalProps> = ({
         });
 
         // Validate converted file size
-        const maxSize = 50 * 1024 * 1024; // 50MB
+        const maxSize = 100 * 1024 * 1024; // 100MB backend limit
         if (finalBlob.size > maxSize) {
           setUploadError('Even after compression, file size is still too large. Please use a shorter recording.');
           setUploading(false);
@@ -127,15 +136,49 @@ export const AudioUploadModal: React.FC<AudioUploadModalProps> = ({
       const objectUrl = URL.createObjectURL(finalBlob);
       audioElement.src = objectUrl;
 
+      // Set a timeout to handle cases where metadata doesn't load
+      const metadataTimeout = setTimeout(() => {
+        console.warn('⚠️ Audio metadata loading timed out after 10 seconds');
+        URL.revokeObjectURL(objectUrl);
+        setUploadError('Failed to load audio metadata. The file may be corrupted or in an unsupported format.');
+        setUploading(false);
+      }, 10000); // 10 second timeout
+
       audioElement.addEventListener('loadedmetadata', async () => {
+        clearTimeout(metadataTimeout);
         const duration = isNaN(audioElement.duration) ? 0 : audioElement.duration;
+        console.log('🎵 Audio metadata loaded:', { duration, fileName: selectedFile.name });
         
         try {
           // Create a properly typed blob with correct content type
           const typedBlob = new Blob([finalBlob], { type: finalContentType });
           
+          // Log final blob details before upload
+          console.log('📦 Final blob prepared for upload:', {
+            size: typedBlob.size,
+            sizeFormatted: formatFileSize(typedBlob.size),
+            contentType: finalContentType,
+            originalSize: selectedFile.size,
+            originalSizeFormatted: formatFileSize(selectedFile.size),
+            compressionRatio: selectedFile.size > 0 
+              ? `${((1 - typedBlob.size / selectedFile.size) * 100).toFixed(1)}% reduction`
+              : 'N/A'
+          });
+          
           // Add the call using the existing addCall function
           const patientId = appointment.patient_id || undefined;
+          console.log('📞 Calling addCall with:', {
+            patientName: appointment.customer_name,
+            patientId,
+            centerId,
+            duration: `${Math.round(duration)}s (${Math.round(duration / 60)}min ${Math.round(duration % 60)}s)`,
+            blobSize: typedBlob.size,
+            blobSizeFormatted: formatFileSize(typedBlob.size)
+          });
+          
+          const uploadStartTime = Date.now();
+          console.log('⏱️ Upload started at:', new Date(uploadStartTime).toISOString());
+          
           const callResult = await addCall(
             typedBlob,
             duration,
@@ -144,6 +187,34 @@ export const AudioUploadModal: React.FC<AudioUploadModalProps> = ({
             patientId,
             centerId
           );
+          
+          const uploadEndTime = Date.now();
+          const uploadDuration = ((uploadEndTime - uploadStartTime) / 1000).toFixed(2);
+          const uploadSpeed = uploadDuration ? formatFileSize(typedBlob.size / parseFloat(uploadDuration)) + '/s' : 'N/A';
+          
+          console.log('✅ Upload completed:', {
+            duration: `${uploadDuration}s`,
+            speed: uploadSpeed,
+            totalSize: formatFileSize(typedBlob.size),
+            completedAt: new Date(uploadEndTime).toISOString()
+          });
+          console.log('✅ addCall completed, result:', callResult);
+          
+          if (!callResult) {
+            console.error('❌ addCall returned undefined - user may not be authenticated');
+            setUploadError('Failed to upload: User not authenticated. Please refresh and try again.');
+            URL.revokeObjectURL(objectUrl);
+            setUploading(false);
+            return;
+          }
+          
+          console.log('🔍 Checking callResult.id:', {
+            callResult,
+            id: (callResult as any)?.id,
+            idType: typeof (callResult as any)?.id,
+            hasDash: typeof (callResult as any)?.id === 'string' ? (callResult as any).id.includes('-') : false,
+            idLength: typeof (callResult as any)?.id === 'string' ? (callResult as any).id.length : 0
+          });
           
           const successMessage = compressionInfo 
             ? `Recording uploaded and compressed from ${formatFileSize(compressionInfo.originalSize)} to ${formatFileSize(compressionInfo.convertedSize)} (${compressionInfo.ratio}% smaller)`
@@ -155,24 +226,46 @@ export const AudioUploadModal: React.FC<AudioUploadModalProps> = ({
           });
 
           URL.revokeObjectURL(objectUrl);
+          clearTimeout(metadataTimeout);
+          
+          // Call onUploadComplete first to refresh the calls list
           onUploadComplete();
           
           // Navigate to analysis page only if we have a valid UUID id
           const newId = (callResult as any)?.id;
+          console.log('🧭 Navigation check:', {
+            newId,
+            isString: typeof newId === 'string',
+            hasDash: typeof newId === 'string' ? newId.includes('-') : false,
+            length: typeof newId === 'string' ? newId.length : 0,
+            willNavigate: typeof newId === 'string' && newId.includes('-') && newId.length >= 32
+          });
+          
           if (typeof newId === 'string' && newId.includes('-') && newId.length >= 32) {
-            navigate(`/analysis/${newId}`);
+            console.log('✅ Navigating to analysis page:', `/analysis/${newId}`);
+            // Small delay to ensure state updates complete before navigation
+            setTimeout(() => {
+              navigate(`/analysis/${newId}`);
+            }, 100);
+          } else {
+            console.warn('⚠️ Navigation skipped - invalid ID:', newId);
+            // Calls list should already be refreshed by onUploadComplete
           }
         } catch (error) {
-          console.error('Error uploading audio:', error);
+          console.error('❌ Error uploading audio:', error);
           setUploadError('Failed to upload audio file. Please try again.');
+          URL.revokeObjectURL(objectUrl);
+          clearTimeout(metadataTimeout);
         } finally {
           setUploading(false);
         }
       });
 
-      audioElement.addEventListener('error', () => {
+      audioElement.addEventListener('error', (e) => {
+        clearTimeout(metadataTimeout);
+        console.error('❌ Audio element error:', e);
         URL.revokeObjectURL(objectUrl);
-        setUploadError('Invalid audio file. Please select a valid audio recording.');
+        setUploadError('Invalid audio file. Please select a valid audio recording. The file may be corrupted or in an unsupported format.');
         setUploading(false);
       });
 
@@ -213,10 +306,13 @@ export const AudioUploadModal: React.FC<AudioUploadModalProps> = ({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-md" aria-describedby="upload-dialog-description">
         <DialogHeader>
           <DialogTitle>Upload Call Recording</DialogTitle>
         </DialogHeader>
+        <div id="upload-dialog-description" className="sr-only">
+          Upload an audio file for a call recording
+        </div>
         
         <div className="space-y-4">
           <div className="space-y-2">
@@ -234,9 +330,9 @@ export const AudioUploadModal: React.FC<AudioUploadModalProps> = ({
             <AlertDescription>
               <div className="space-y-1">
                 <div><strong>Supported formats:</strong> WAV, MP3, M4A, WebM, OGG</div>
-                <div><strong>Size limit:</strong> 50MB (large WAV files auto-compress to WebM)</div>
+                <div><strong>Size limit:</strong> 100MB (WAV files accepted directly, no conversion needed)</div>
                 <div className="text-xs text-muted-foreground mt-1">
-                  WAV files over 5MB are automatically converted to WebM format to reduce file size
+                  WAV files are uploaded directly without conversion for faster uploads
                 </div>
               </div>
             </AlertDescription>
@@ -275,9 +371,9 @@ export const AudioUploadModal: React.FC<AudioUploadModalProps> = ({
                     <div className="text-sm font-medium truncate">{selectedFile.name}</div>
                     <div className="text-xs text-muted-foreground">
                       {formatFileSize(selectedFile.size)}
-                      {shouldConvertAudio(selectedFile, selectedFile.name) && 
-                        <span className="ml-2 text-orange-600">• Will be converted to WebM</span>
-                      }
+                    {shouldConvertAudio(selectedFile, selectedFile.name) && 
+                        <span className="ml-2 text-orange-600">• Large file - will be compressed to WebM</span>
+                    }
                     </div>
                   </div>
                 </div>

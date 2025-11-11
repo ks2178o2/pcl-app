@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from './useAuth';
 import { useProfile } from './useProfile';
@@ -28,16 +28,47 @@ export const useAppointments = () => {
   const { user } = useAuth();
   const { profile } = useProfile();
   const { toast } = useToast();
+  const loadingRef = useRef(false);
+  const userRef = useRef(user);
+  const profileRef = useRef(profile);
+  
+  // Keep refs updated with latest values (update immediately, not in useEffect)
+  userRef.current = user;
+  profileRef.current = profile;
 
-  const loadAppointments = async (targetDate?: Date) => {
-    if (!user) return;
+  const loadAppointments = async (targetDate?: Date, retryCount = 0) => {
+    // Use refs to get latest values (avoids stale closure)
+    let currentUser = userRef.current;
+    let currentProfile = profileRef.current;
+    
+    // If user is not available, wait a bit and retry (up to 3 times)
+    if (!currentUser && retryCount < 3) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+      currentUser = userRef.current; // Check again after delay
+      currentProfile = profileRef.current;
+      
+      if (!currentUser) {
+        // Retry after another delay
+        return loadAppointments(targetDate, retryCount + 1);
+      }
+    }
+    
+    if (!currentUser) {
+      return;
+    }
+    
+    // Prevent duplicate calls
+    if (loadingRef.current) {
+      return;
+    }
 
     try {
+      loadingRef.current = true;
       setLoading(true);
       
       // Get appointments for the specified date (default: today)
       // Use user's timezone from settings, default to Pacific time if not set
-      const userTimezone = profile?.timezone || 'America/Los_Angeles';
+      const userTimezone = currentProfile?.timezone || 'America/Los_Angeles';
       const dateToUse = targetDate || new Date();
       
       // Get date components in user's timezone
@@ -121,25 +152,20 @@ export const useAppointments = () => {
       dayEndUTC.setUTCDate(dayEndUTC.getUTCDate() + 1);
       dayEndUTC.setUTCMilliseconds(-1);
       
-      console.log('📅 Loading appointments for date:', {
-        targetDate: dateToUse.toLocaleDateString(),
-        userTimezone,
-        userDate: userDateStr,
-        utcRange: `${dayStartUTC.toISOString()} to ${dayEndUTC.toISOString()}`
-      });
+      // Don't clear appointments here - let the component handle loading state
+      // Clearing here causes useEffect dependencies to change unnecessarily
 
       const { data, error } = await supabase
         .from('appointments')
         .select('*')
-        .eq('user_id', user.id)
+        .eq('user_id', currentUser.id)
         .gte('appointment_date', dayStartUTC.toISOString())
         .lt('appointment_date', dayEndUTC.toISOString())
         .order('appointment_date', { ascending: true });
       
-      console.log('📊 Found appointments:', data?.length || 0);
-
       if (error) {
         console.error('Error loading appointments:', error);
+        setAppointments([]); // Clear on error
         return;
       }
 
@@ -218,12 +244,12 @@ export const useAppointments = () => {
         phone_number: appointment.customer_phone || appointment.phone_number
       }));
 
-      console.log('✅ Setting', appointmentsToSet.length, 'appointments (decryption disabled)');
       setAppointments(appointmentsToSet);
     } catch (error) {
       console.error('Error loading appointments:', error);
     } finally {
       setLoading(false);
+      loadingRef.current = false; // Reset ref to allow future calls
     }
   };
 
@@ -316,13 +342,13 @@ export const useAppointments = () => {
       console.error('Error clearing appointments:', error);
       return false;
     } finally {
+      loadingRef.current = false;
       setLoading(false);
     }
   };
 
-  useEffect(() => {
-    loadAppointments();
-  }, [user]);
+  // Don't auto-load appointments - let components call loadAppointments explicitly
+  // This prevents duplicate calls when components like ScheduleDetail call loadAppointments(selectedDate)
 
   return {
     appointments,

@@ -5,7 +5,7 @@ import { defineConfig, devices } from '@playwright/test';
  * See https://playwright.dev/docs/test-configuration.
  */
 export default defineConfig({
-  testDir: './e2e',
+  testDir: './apps/realtime-gateway/e2e',
   testMatch: /.*\.spec\.(ts|tsx)$/,
   
   /* Run tests in files in parallel */

@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -34,6 +34,8 @@ import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { AudioUploadModal } from '@/components/AudioUploadModal';
+import { ChunkedAudioRecorder } from '@/components/ChunkedAudioRecorder';
+import { useCenterSession } from '@/hooks/useCenterSession';
 
 interface PatientInfo {
   dob?: string;
@@ -54,10 +56,12 @@ interface SelectedAppointment extends Appointment {
 
 const ScheduleDetail = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user, signOut } = useAuth();
   const { profile } = useProfile();
   const { appointments, loading: appointmentsLoading, loadAppointments } = useAppointments();
-  const { calls, loadCalls } = useCallRecords();
+  const { calls, loadCalls, handleChunkedRecordingComplete } = useCallRecords();
+  const { activeCenter } = useCenterSession();
   
   const [selectedAppointment, setSelectedAppointment] = useState<SelectedAppointment | null>(null);
   const [filter, setFilter] = useState<'all' | 'consults' | 'confirmed' | 'pending' | 'no-show'>('all');
@@ -66,6 +70,11 @@ const ScheduleDetail = () => {
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [patientInfoMap, setPatientInfoMap] = useState<Map<string, PatientInfo>>(new Map());
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
+  
+  // Refs to prevent infinite loops in useEffect hooks
+  const lastAppointmentsKeyRef = useRef<string>('');
+  const lastSelectedAppointmentKeyRef = useRef<string>('');
+  const lastLoadedDateRef = useRef<string>('');
 
   const loadPatientDetailsForAllAppointments = async () => {
     if (!appointments || appointments.length === 0) return;
@@ -244,10 +253,17 @@ const ScheduleDetail = () => {
         .order('start_time', { ascending: false })
         .limit(10);
 
-      setSelectedAppointment({
-        ...appointment,
-        patientInfo: patientInfo || undefined,
-        calls: patientCalls || [],
+      // Only update if this is still the selected appointment to avoid race conditions
+      setSelectedAppointment(prev => {
+        // If we're trying to load a different appointment, don't update
+        if (prev && prev.id !== appointmentId) {
+          return prev;
+        }
+        return {
+          ...appointment,
+          patientInfo: patientInfo || undefined,
+          calls: patientCalls || [],
+        };
       });
     } catch (error) {
       console.error('Error loading patient details:', error);
@@ -259,46 +275,164 @@ const ScheduleDetail = () => {
     await loadPatientDetails(appointment.id);
   };
 
-  const handleStartConsult = () => {
-    setIsRecording(true);
-    // TODO: Start recording for this appointment
-    // Navigate to recording or start recording service
-  };
-
-  const handleFinishRecording = () => {
+  const handleRecordingComplete = async (callRecordId: string, totalDuration: number) => {
     setIsRecording(false);
-    // TODO: Stop recording and save
+    if (handleChunkedRecordingComplete) {
+      await handleChunkedRecordingComplete(callRecordId, totalDuration);
+    }
+    // Reload calls to show the new recording
+    loadCalls(50);
   };
 
-  // Load appointments when date changes
-  useEffect(() => {
-    if (!user || !profile) return;
+  const handleStartConsult = () => {
+    if (!selectedAppointment) {
+      console.error('No appointment selected');
+      return;
+    }
+    if (!activeCenter) {
+      console.error('No center selected');
+      return;
+    }
+    setIsRecording(true);
+  };
+
+  const handleCancelRecording = () => {
+    setIsRecording(false);
+  };
+
+  // Use stable dependencies to prevent excessive re-renders
+  // Extract primitive values and stable keys before useEffects
+  const userId = user?.id;
+  const profileId = profile?.id;
+  // Use date string to prevent Date object reference issues - normalize to YYYY-MM-DD
+  const selectedDateString = selectedDate 
+    ? `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`
+    : '';
+  const appointmentsLength = appointments.length;
+  const appointmentsKey = appointments.map(a => a.id).join(',');
+  const patientInfoMapSize = patientInfoMap.size;
+  const selectedAppointmentId = selectedAppointment?.id;
+
+  // Simple, bulletproof approach: track last pathname and always reload when it matches
+  const lastPathnameRef = useRef<string>('');
+  const lastDateRef = useRef<string>('');
+  
+  // BULLETPROOF: Always reload when pathname is /schedule
+  // Use useLayoutEffect to run synchronously before paint
+  useLayoutEffect(() => {
+    if (!userId || !profileId || !selectedDate) return;
     
-    // Load recent calls
-    loadCalls(50);
+    // Only proceed if we're actually on the schedule route
+    if (location.pathname !== '/schedule') {
+      lastPathnameRef.current = location.pathname;
+      return;
+    }
     
-    // Load appointments for selected date
-    loadAppointments(selectedDate);
+    const pathnameChanged = lastPathnameRef.current !== '/schedule';
+    const dateChanged = lastDateRef.current !== selectedDateString;
+    const isEmpty = appointments.length === 0 && !appointmentsLoading;
+    
+    // ALWAYS reload if pathname changed OR date changed OR appointments are empty
+    if (pathnameChanged || dateChanged || isEmpty) {
+      lastPathnameRef.current = '/schedule';
+      lastDateRef.current = selectedDateString;
+      
+      // Reset refs to allow fresh data loading
+      lastAppointmentsKeyRef.current = '';
+      lastSelectedAppointmentKeyRef.current = '';
+      
+      // Clear selection and patient info to avoid showing stale data
+      setSelectedAppointment(null);
+      setPatientInfoMap(new Map());
+      // Don't load here - let the useEffect below handle it when user/profile are ready
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, profile, selectedDate]);
+  }, [userId, profileId, selectedDateString, location.pathname, appointments.length, appointmentsLoading]);
+  
+  // Reload when userId/profileId are ready AND we're on schedule route
+  // This ensures hooks have the latest user/profile before calling load functions
+  useEffect(() => {
+    if (!userId || !profileId || !selectedDate || location.pathname !== '/schedule') return;
+    
+    const pathnameChanged = lastPathnameRef.current !== '/schedule';
+    const dateChanged = lastDateRef.current !== selectedDateString;
+    const isEmpty = appointments.length === 0 && !appointmentsLoading;
+    
+    // Reload if pathname changed to schedule OR date changed OR data is empty
+    if (pathnameChanged || dateChanged || isEmpty) {
+      lastPathnameRef.current = '/schedule';
+      lastDateRef.current = selectedDateString;
+      
+      // Reset refs to allow fresh data loading
+      lastAppointmentsKeyRef.current = '';
+      lastSelectedAppointmentKeyRef.current = '';
+      
+      // Clear selection and patient info to avoid showing stale data
+      setSelectedAppointment(null);
+      setPatientInfoMap(new Map());
+      
+      // Wait a bit to ensure hooks have updated their refs with the latest user
+      const timer = setTimeout(() => {
+        // Load data
+        loadCalls(50);
+        
+        const dateToLoad = new Date(selectedDate);
+        dateToLoad.setHours(0, 0, 0, 0);
+        loadAppointments(dateToLoad);
+      }, 100);
+      
+      return () => clearTimeout(timer);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId, profileId, selectedDateString, location.pathname, appointments.length, appointmentsLoading]);
+
+  // Reload when tab becomes visible (handles tab switching)
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (!document.hidden && userId && profileId && location.pathname === '/schedule') {
+        // Tab became visible - reload data
+        loadCalls(50);
+        const dateToLoad = new Date(selectedDate);
+        dateToLoad.setHours(0, 0, 0, 0);
+        loadAppointments(dateToLoad);
+      }
+    };
+    
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId, profileId, location.pathname, selectedDate]);
 
   // Load patient details for all appointments when appointments change
+  // Use a ref to prevent calling this multiple times for the same appointments
   useEffect(() => {
-    if (appointments.length > 0 && user) {
-      loadPatientDetailsForAllAppointments();
+    if (appointmentsLength > 0 && userId && appointmentsKey && appointmentsKey !== lastAppointmentsKeyRef.current) {
+      // Only load if we actually have appointment IDs and the key has changed
+      const hasValidAppointments = appointments.some(apt => apt.id);
+      if (hasValidAppointments) {
+        lastAppointmentsKeyRef.current = appointmentsKey;
+        loadPatientDetailsForAllAppointments();
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [appointments, user]);
+  }, [appointmentsKey, userId]);
 
-  // Select first appointment when appointments are loaded
+  // Select first appointment when appointments are loaded and patient info is ready
+  // Use a ref to prevent selecting the same appointment multiple times
   useEffect(() => {
-    if (appointments.length > 0 && !selectedAppointment) {
+    const currentKey = `${appointmentsKey}-${patientInfoMapSize}`;
+    if (appointmentsLength > 0 && !selectedAppointmentId && patientInfoMapSize > 0 && currentKey !== lastSelectedAppointmentKeyRef.current) {
       const firstAppointment = appointments[0];
-      loadPatientDetails(firstAppointment.id);
-      setSelectedAppointment(firstAppointment);
+      if (firstAppointment) {
+        lastSelectedAppointmentKeyRef.current = currentKey;
+        loadPatientDetails(firstAppointment.id);
+        setSelectedAppointment(firstAppointment);
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [appointments, patientInfoMap]);
+  }, [appointmentsKey, patientInfoMapSize]);
 
   // Filter appointments based on selected filter
   const filteredAppointments = appointments.filter(apt => {
@@ -318,19 +452,24 @@ const ScheduleDetail = () => {
   };
 
   const handleDateChange = (newDate: Date) => {
-    setSelectedDate(newDate);
+    // Normalize the date to midnight to avoid timezone issues
+    const normalizedDate = new Date(newDate);
+    normalizedDate.setHours(0, 0, 0, 0);
+    setSelectedDate(normalizedDate);
     setSelectedAppointment(null); // Clear selection when changing dates
   };
 
   const handlePreviousDay = () => {
     const newDate = new Date(selectedDate);
     newDate.setDate(newDate.getDate() - 1);
+    newDate.setHours(0, 0, 0, 0); // Normalize to midnight
     handleDateChange(newDate);
   };
 
   const handleNextDay = () => {
     const newDate = new Date(selectedDate);
     newDate.setDate(newDate.getDate() + 1);
+    newDate.setHours(0, 0, 0, 0); // Normalize to midnight
     handleDateChange(newDate);
   };
 
@@ -372,9 +511,14 @@ const ScheduleDetail = () => {
                     </PopoverTrigger>
                     <PopoverContent className="w-auto p-0" align="start">
                       <Calendar
+                        key={selectedDateString} // Force re-render when date changes
                         mode="single"
                         selected={selectedDate}
-                        onSelect={(date) => date && handleDateChange(date)}
+                        onSelect={(date) => {
+                          if (date) {
+                            handleDateChange(date);
+                          }
+                        }}
                         initialFocus
                       />
                     </PopoverContent>
@@ -485,17 +629,8 @@ const ScheduleDetail = () => {
                     aptDate = new Date(appointmentDateStr + 'Z');
                   }
                   
-                  // Debug: Log first appointment to check parsing
-                  if (idx === 0) {
-                    const pacificTime = aptDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/Los_Angeles' });
-                    const utcTime = aptDate.toUTCString();
-                    console.log('🕐 Appointment date parsing:');
-                    console.log('  Raw string:', appointmentDateStr);
-                    console.log('  Parsed ISO:', aptDate.toISOString());
-                    console.log('  Pacific time:', pacificTime);
-                    console.log('  UTC time:', utcTime);
-                    console.log('  Customer:', appointment.customer_name);
-                  }
+                  // Debug: Log first appointment to check parsing (only once per appointment list)
+                  // Removed excessive logging that was causing performance issues during re-renders
                   
                   // Use user's timezone from settings, default to Pacific time if not set
                   const displayTimezone = profile?.timezone || 'America/Los_Angeles';
@@ -640,39 +775,43 @@ const ScheduleDetail = () => {
                 </div>
 
                 {/* Start Consult + Upload Recording Buttons */}
-                <div className="flex gap-2">
-                  <button
-                    onClick={isRecording ? handleFinishRecording : handleStartConsult}
-                      className={cn(
-                        "flex-1 flex items-center justify-center rounded-lg h-10 px-4 text-sm font-bold transition-colors",
-                        isRecording
-                          ? "bg-red-600 hover:bg-red-700 text-white"
-                          : "bg-primary hover:opacity-90 text-white"
-                      )}
-                  >
-                    {isRecording ? (
-                      <>
-                        <StopCircle className="h-4 w-4 mr-2" />
-                        Finish Recording
-                      </>
-                    ) : (
-                      <>
-                        <Mic className="h-4 w-4 mr-2" />
-                        Start Consult
-                      </>
-                    )}
-                  </button>
-                  <button
-                    onClick={() => setUploadModalOpen(true)}
-                    className={cn(
-                      "flex-1 flex items-center justify-center rounded-lg h-10 px-4 text-sm font-bold transition-colors",
-                      "bg-blue-600 hover:bg-blue-700 text-white"
-                    )}
-                  >
-                    <Upload className="h-4 w-4 mr-2" />
-                    Upload Recording
-                  </button>
-                </div>
+                {isRecording && selectedAppointment ? (
+                  <div className="space-y-3">
+                    <ChunkedAudioRecorder
+                      onRecordingComplete={handleRecordingComplete}
+                      patientName={selectedAppointment.customer_name}
+                      patientId={selectedAppointment.patient_id || undefined}
+                      centerId={activeCenter || undefined}
+                      disabled={false}
+                      autoStart={true}
+                    />
+                  </div>
+                ) : (
+                  <div className="flex gap-2">
+                    <Button
+                      onClick={handleStartConsult}
+                      disabled={!selectedAppointment || !activeCenter}
+                      className="flex-1"
+                    >
+                      <Mic className="h-4 w-4 mr-2" />
+                      Start Consult
+                    </Button>
+                    <Button
+                      onClick={() => setUploadModalOpen(true)}
+                      variant="secondary"
+                      className="flex-1"
+                    >
+                      <Upload className="h-4 w-4 mr-2" />
+                      Upload Recording
+                    </Button>
+                  </div>
+                )}
+                
+                {!activeCenter && !isRecording && (
+                  <p className="text-sm text-muted-foreground mt-2">
+                    Please select a center before starting a consult
+                  </p>
+                )}
 
                 {/* Upload Recording Modal */}
                 <Dialog open={uploadModalOpen} onOpenChange={setUploadModalOpen}>
@@ -726,13 +865,22 @@ const ScheduleDetail = () => {
                             <div className="flex items-center justify-center size-8 rounded-full bg-blue-100 flex-shrink-0">
                               <Phone className="h-4 w-4 text-blue-600" />
                             </div>
-                            <div>
+                            <div className="flex flex-col gap-1">
                               <p className="text-sm text-gray-900">
-                                {call.transcript || 'Call with patient'}
+                                Call with patient
                               </p>
-                              <p className="text-xs text-gray-600">
-                                {callDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                              </p>
+                              <div className="flex items-center gap-2">
+                                <p className="text-xs text-gray-600">
+                                  {callDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                </p>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => navigate(`/analysis/${call.id}`)}
+                                >
+                                  View Analysis
+                                </Button>
+                              </div>
                             </div>
                           </div>
                         );
