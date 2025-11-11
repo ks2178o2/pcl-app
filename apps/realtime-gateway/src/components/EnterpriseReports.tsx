@@ -23,6 +23,15 @@ interface SalespersonMetrics {
   conversion_rate: number;
 }
 
+interface CallTypeBreakdown {
+  call_type: string;
+  total: number;
+  scheduled: number;
+  not_scheduled: number;
+  success_rate: number;
+  avg_quality_score: number;
+}
+
 interface ReportsData {
   totalRecordings: number;
   avgQualityScore: number;
@@ -31,6 +40,12 @@ interface ReportsData {
   salespersonMetrics: SalespersonMetrics[];
   qualityTrends: Array<{ date: string; score: number; calls: number }>;
   centerMetrics: Array<{ name: string; calls: number; quality: number }>;
+  callTypeBreakdown: CallTypeBreakdown[];
+  callCategoryBreakdown: {
+    scheduled: number;
+    not_scheduled: number;
+    other_question: number;
+  };
 }
 
 export const EnterpriseReports = () => {
@@ -171,6 +186,16 @@ export const EnterpriseReports = () => {
     // Generate center metrics
     const centerMetrics = generateCenterMetrics(callRecords, centersData);
 
+    // Generate call_type breakdown
+    const callTypeBreakdown = generateCallTypeBreakdown(callRecords);
+
+    // Generate call_category breakdown
+    const callCategoryBreakdown = {
+      scheduled: callRecords.filter(r => r.call_category === 'consult_scheduled').length,
+      not_scheduled: callRecords.filter(r => r.call_category === 'consult_not_scheduled').length,
+      other_question: callRecords.filter(r => r.call_category === 'other_question' || !r.call_category).length
+    };
+
       return {
         totalRecordings,
         avgQualityScore,
@@ -178,8 +203,48 @@ export const EnterpriseReports = () => {
         activeRegions: new Set(centersData.map(c => c.region?.name).filter(Boolean)).size,
         salespersonMetrics: salespersonMetrics.sort((a, b) => b.avg_quality_score - a.avg_quality_score),
         qualityTrends,
-        centerMetrics
+        centerMetrics,
+        callTypeBreakdown,
+        callCategoryBreakdown
       };
+  };
+
+  const generateCallTypeBreakdown = (callRecords: any[]): CallTypeBreakdown[] => {
+    const typeMap = new Map<string, { total: number; scheduled: number; not_scheduled: number; qualityScores: number[] }>();
+    
+    callRecords.forEach(record => {
+      const callType = record.call_type || 'unknown';
+      const category = record.call_category;
+      const qualityScore = record.call_analyses?.[0]?.sales_performance_score;
+      
+      if (!typeMap.has(callType)) {
+        typeMap.set(callType, { total: 0, scheduled: 0, not_scheduled: 0, qualityScores: [] });
+      }
+      
+      const stats = typeMap.get(callType)!;
+      stats.total++;
+      
+      if (category === 'consult_scheduled') {
+        stats.scheduled++;
+      } else if (category === 'consult_not_scheduled') {
+        stats.not_scheduled++;
+      }
+      
+      if (qualityScore !== null && qualityScore !== undefined) {
+        stats.qualityScores.push(qualityScore);
+      }
+    });
+    
+    return Array.from(typeMap.entries()).map(([call_type, stats]) => ({
+      call_type: call_type === 'unknown' ? 'Not Classified' : call_type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+      total: stats.total,
+      scheduled: stats.scheduled,
+      not_scheduled: stats.not_scheduled,
+      success_rate: stats.total > 0 ? Math.round((stats.scheduled / stats.total) * 100) : 0,
+      avg_quality_score: stats.qualityScores.length > 0 
+        ? Math.round((stats.qualityScores.reduce((sum, score) => sum + score, 0) / stats.qualityScores.length) * 10) / 10
+        : 0
+    })).sort((a, b) => b.total - a.total);
   };
 
   const generateQualityTrends = (callRecords: any[]) => {
@@ -344,6 +409,7 @@ export const EnterpriseReports = () => {
           <TabsTrigger value="salespeople">Salespeople Rankings</TabsTrigger>
           <TabsTrigger value="trends">Quality Trends</TabsTrigger>
           <TabsTrigger value="centers">Center Performance</TabsTrigger>
+          <TabsTrigger value="call-types">Call Type Analysis</TabsTrigger>
         </TabsList>
 
         <TabsContent value="salespeople" className="space-y-4">
@@ -437,6 +503,129 @@ export const EnterpriseReports = () => {
                   <Bar dataKey="quality" fill="hsl(var(--secondary))" />
                 </BarChart>
               </ResponsiveContainer>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="call-types" className="space-y-4">
+          {/* Call Category Breakdown */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Call Status Breakdown</CardTitle>
+              <CardDescription>Distribution of calls by success status</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-3 gap-4 mb-4">
+                <div className="text-center p-4 border rounded-lg">
+                  <div className="text-2xl font-bold text-green-600">
+                    {reportsData.callCategoryBreakdown.scheduled}
+                  </div>
+                  <div className="text-sm text-muted-foreground">✅ Scheduled</div>
+                </div>
+                <div className="text-center p-4 border rounded-lg">
+                  <div className="text-2xl font-bold text-red-600">
+                    {reportsData.callCategoryBreakdown.not_scheduled}
+                  </div>
+                  <div className="text-sm text-muted-foreground">❌ Not Scheduled</div>
+                </div>
+                <div className="text-center p-4 border rounded-lg">
+                  <div className="text-2xl font-bold text-gray-600">
+                    {reportsData.callCategoryBreakdown.other_question}
+                  </div>
+                  <div className="text-sm text-muted-foreground">❓ Other Question</div>
+                </div>
+              </div>
+              <ResponsiveContainer width="100%" height={300}>
+                <PieChart>
+                  <Pie
+                    data={[
+                      { name: 'Scheduled', value: reportsData.callCategoryBreakdown.scheduled, fill: COLORS[0] },
+                      { name: 'Not Scheduled', value: reportsData.callCategoryBreakdown.not_scheduled, fill: COLORS[1] },
+                      { name: 'Other Question', value: reportsData.callCategoryBreakdown.other_question, fill: COLORS[2] }
+                    ]}
+                    cx="50%"
+                    cy="50%"
+                    labelLine={false}
+                    label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                    outerRadius={80}
+                    fill="#8884d8"
+                    dataKey="value"
+                  >
+                    {[
+                      { name: 'Scheduled', value: reportsData.callCategoryBreakdown.scheduled },
+                      { name: 'Not Scheduled', value: reportsData.callCategoryBreakdown.not_scheduled },
+                      { name: 'Other Question', value: reportsData.callCategoryBreakdown.other_question }
+                    ].map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip />
+                </PieChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+
+          {/* Call Type Breakdown */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Call Type Breakdown</CardTitle>
+              <CardDescription>Performance metrics by call type</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="mb-4">
+                <ResponsiveContainer width="100%" height={300}>
+                  <BarChart data={reportsData.callTypeBreakdown}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis 
+                      dataKey="call_type" 
+                      angle={-45}
+                      textAnchor="end"
+                      height={100}
+                    />
+                    <YAxis />
+                    <Tooltip />
+                    <Bar dataKey="total" fill={COLORS[0]} name="Total Calls" />
+                    <Bar dataKey="scheduled" fill={COLORS[1]} name="Scheduled" />
+                    <Bar dataKey="not_scheduled" fill={COLORS[2]} name="Not Scheduled" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Call Type</TableHead>
+                    <TableHead>Total Calls</TableHead>
+                    <TableHead>Scheduled</TableHead>
+                    <TableHead>Not Scheduled</TableHead>
+                    <TableHead>Success Rate</TableHead>
+                    <TableHead>Avg Quality</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {reportsData.callTypeBreakdown.map((type, index) => (
+                    <TableRow key={index}>
+                      <TableCell className="font-medium">{type.call_type}</TableCell>
+                      <TableCell>{type.total}</TableCell>
+                      <TableCell>
+                        <Badge variant="default">{type.scheduled}</Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="secondary">{type.not_scheduled}</Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={type.success_rate >= 50 ? "default" : type.success_rate >= 30 ? "secondary" : "destructive"}>
+                          {type.success_rate}%
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={type.avg_quality_score >= 7 ? "default" : "secondary"}>
+                          {type.avg_quality_score.toFixed(1)}/10
+                        </Badge>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             </CardContent>
           </Card>
         </TabsContent>

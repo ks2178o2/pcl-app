@@ -118,7 +118,8 @@ export const EnhancedUploadManager: React.FC = () => {
         setUploadProgress(prev => Math.min(prev + 10, 90));
       }, 200);
 
-      const response = await fetch('/api/enhanced-context/upload/file', {
+      const { getApiUrl } = await import('@/utils/apiConfig');
+      const response = await fetch(getApiUrl('/api/enhanced-context/upload/file'), {
         method: 'POST',
         body: formData,
       });
@@ -186,7 +187,8 @@ export const EnhancedUploadManager: React.FC = () => {
         setUploadProgress(prev => Math.min(prev + 15, 90));
       }, 300);
 
-      const response = await fetch('/api/enhanced-context/upload/web-scrape', {
+      const { getApiUrl } = await import('@/utils/apiConfig');
+      const response = await fetch(getApiUrl('/api/enhanced-context/upload/web-scrape'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -256,7 +258,8 @@ export const EnhancedUploadManager: React.FC = () => {
         setUploadProgress(prev => Math.min(prev + 5, 90));
       }, 100);
 
-      const response = await fetch('/api/enhanced-context/upload/bulk', {
+      const { getApiUrl } = await import('@/utils/apiConfig');
+      const response = await fetch(getApiUrl('/api/enhanced-context/upload/bulk'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

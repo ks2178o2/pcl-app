@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from './useAuth';
+import { useProfile } from './useProfile';
 import { useToast } from '@/hooks/use-toast';
 
 export interface Appointment {
@@ -12,75 +13,243 @@ export interface Appointment {
   patient_id?: string;
   email?: string;
   phone_number?: string;
+  status?: string;
+  notes?: string;
+  type?: string;
+  duration_minutes?: number;
 }
+
+// Note: The decrypt_sensitive_data function should be created in the database
+// Run create_encryption_functions.sql in your Supabase SQL Editor
 
 export const useAppointments = () => {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [loading, setLoading] = useState(false);
   const { user } = useAuth();
+  const { profile } = useProfile();
   const { toast } = useToast();
+  const loadingRef = useRef(false);
+  const userRef = useRef(user);
+  const profileRef = useRef(profile);
+  
+  // Keep refs updated with latest values (update immediately, not in useEffect)
+  userRef.current = user;
+  profileRef.current = profile;
 
-  const loadAppointments = async () => {
-    if (!user) return;
+  const loadAppointments = async (targetDate?: Date, retryCount = 0) => {
+    // Use refs to get latest values (avoids stale closure)
+    let currentUser = userRef.current;
+    let currentProfile = profileRef.current;
+    
+    // If user is not available, wait a bit and retry (up to 3 times)
+    if (!currentUser && retryCount < 3) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+      currentUser = userRef.current; // Check again after delay
+      currentProfile = profileRef.current;
+      
+      if (!currentUser) {
+        // Retry after another delay
+        return loadAppointments(targetDate, retryCount + 1);
+      }
+    }
+    
+    if (!currentUser) {
+      return;
+    }
+    
+    // Prevent duplicate calls
+    if (loadingRef.current) {
+      return;
+    }
 
     try {
+      loadingRef.current = true;
       setLoading(true);
       
-      // Get appointments that are not more than 4 hours in the past
-      const fourHoursAgo = new Date();
-      fourHoursAgo.setHours(fourHoursAgo.getHours() - 4);
+      // Get appointments for the specified date (default: today)
+      // Use user's timezone from settings, default to Pacific time if not set
+      const userTimezone = currentProfile?.timezone || 'America/Los_Angeles';
+      const dateToUse = targetDate || new Date();
+      
+      // Get date components in user's timezone
+      const userDateStr = dateToUse.toLocaleDateString('en-US', { 
+        timeZone: userTimezone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+      });
+      const [month, day, year] = userDateStr.split('/').map(Number);
+      
+      // Create date string in YYYY-MM-DD format
+      const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      
+      // Create start and end of day in user's timezone, then convert to UTC for query
+      // Method: Create a string representing midnight in user's TZ, then parse it to get UTC equivalent
+      // We'll create dates and test what they represent in user's TZ until we find midnight
+      const tzFormatter = new Intl.DateTimeFormat('en-US', {
+        timeZone: userTimezone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+      });
+      
+      // Start with a reasonable guess: UTC midnight for this date
+      // Then adjust until we find what UTC time shows as midnight in user's TZ
+      let dayStartUTC = new Date(Date.UTC(year, month - 1, day, 0, 0, 0, 0));
+      
+      // Get what this UTC time represents in user's TZ
+      let tzParts = tzFormatter.formatToParts(dayStartUTC);
+      let tzHour = parseInt(tzParts.find(p => p.type === 'hour')?.value || '0');
+      let tzDayFromParts = parseInt(tzParts.find(p => p.type === 'day')?.value || String(day));
+      let tzMonthFromParts = parseInt(tzParts.find(p => p.type === 'month')?.value || String(month));
+      let tzYearFromParts = parseInt(tzParts.find(p => p.type === 'year')?.value || String(year));
+      
+      // If UTC midnight doesn't show as midnight in user's TZ, adjust
+      // If user's TZ shows hour X when UTC is midnight, then user's midnight is at UTC hour (24-X) on same/adjacent day
+      if (tzHour !== 0 || tzDayFromParts !== day || tzMonthFromParts !== month || tzYearFromParts !== year) {
+        // Calculate offset: if UTC shows as hour X in user's TZ, adjust by X hours
+        // If tzDay is different, also adjust day
+        if (tzDayFromParts < day || (tzDayFromParts === day && tzHour > 12)) {
+          // User's TZ is ahead of UTC (UTC midnight = earlier day/time in user's TZ)
+          // So user's midnight = later UTC time (add hours)
+          dayStartUTC = new Date(Date.UTC(year, month - 1, day, tzHour, 0, 0, 0));
+        } else {
+          // User's TZ is behind UTC
+          // Adjust backwards
+          const hoursBack = 24 - tzHour;
+          dayStartUTC = new Date(Date.UTC(year, month - 1, day - 1, hoursBack, 0, 0, 0));
+        }
+        
+        // Verify by checking one more time
+        tzParts = tzFormatter.formatToParts(dayStartUTC);
+        const verifyHour = parseInt(tzParts.find(p => p.type === 'hour')?.value || '0');
+        const verifyDay = parseInt(tzParts.find(p => p.type === 'day')?.value || String(day));
+        
+        // If still not correct, use a binary search approach or just iterate
+        if (verifyHour !== 0 || verifyDay !== day) {
+          // Fallback: iterate to find correct time (should rarely happen)
+          for (let h = 0; h < 24; h++) {
+            const testDate = new Date(Date.UTC(year, month - 1, day, h, 0, 0, 0));
+            const testParts = tzFormatter.formatToParts(testDate);
+            const testHour = parseInt(testParts.find(p => p.type === 'hour')?.value || '0');
+            const testDay = parseInt(testParts.find(p => p.type === 'day')?.value || String(day));
+            const testMonth = parseInt(testParts.find(p => p.type === 'month')?.value || String(month));
+            const testYear = parseInt(testParts.find(p => p.type === 'year')?.value || String(year));
+            
+            if (testHour === 0 && testDay === day && testMonth === month && testYear === year) {
+              dayStartUTC = testDate;
+              break;
+            }
+          }
+        }
+      }
+      
+      // End of day is start of next day minus 1ms
+      const dayEndUTC = new Date(dayStartUTC);
+      dayEndUTC.setUTCDate(dayEndUTC.getUTCDate() + 1);
+      dayEndUTC.setUTCMilliseconds(-1);
+      
+      // Don't clear appointments here - let the component handle loading state
+      // Clearing here causes useEffect dependencies to change unnecessarily
 
       const { data, error } = await supabase
         .from('appointments')
         .select('*')
-        .eq('user_id', user.id)
-        .gte('appointment_date', fourHoursAgo.toISOString())
+        .eq('user_id', currentUser.id)
+        .gte('appointment_date', dayStartUTC.toISOString())
+        .lt('appointment_date', dayEndUTC.toISOString())
         .order('appointment_date', { ascending: true });
-
+      
       if (error) {
         console.error('Error loading appointments:', error);
+        setAppointments([]); // Clear on error
         return;
       }
 
-      // Decrypt sensitive data using RPC call
-      const decryptedAppointments = await Promise.all(
-        (data || []).map(async (appointment) => {
-          try {
-            // Decrypt email if it exists
-            let decryptedEmail = appointment.email;
-            if (appointment.email) {
-              const { data: emailResult } = await supabase.rpc('decrypt_sensitive_data', {
-                encrypted_data: appointment.email
-              });
-              decryptedEmail = emailResult || appointment.email;
-            }
+      // ===================================================================
+      // TODO: ENCRYPTION/DECRYPTION - TEMPORARILY DISABLED FOR TESTING
+      // ===================================================================
+      // The encrypt/decrypt mechanisms have been commented out to allow
+      // continued testing. See ENCRYPTION_TODO.md for details on:
+      // - Re-enabling encryption on insert/update
+      // - Re-enabling decryption on read
+      // - Testing the encryption functions thoroughly
+      // - Setting production encryption keys
+      // ===================================================================
+      
+      // Decrypt sensitive data using RPC call with timeout
+      // DISABLED: const decryptWithTimeout = async (encrypted: string, timeoutMs = 5000): Promise<string | null> => {
+      //   if (!encrypted) return null;
+      //   
+      //   try {
+      //     const timeoutPromise = new Promise<null>((resolve) => {
+      //       setTimeout(() => resolve(null), timeoutMs);
+      //     });
+      //     
+      //     const decryptPromise = supabase.rpc('decrypt_sensitive_data', {
+      //       encrypted_data: encrypted
+      //     }).then(({ data, error }) => {
+      //       if (error) {
+      //         console.warn('Decrypt error:', error.message);
+      //         return null;
+      //       }
+      //       return data;
+      //     });
+      //     
+      //     const result = await Promise.race([decryptPromise, timeoutPromise]);
+      //     return result;
+      //   } catch (error: any) {
+      //     console.warn('Decrypt exception:', error?.message || error);
+      //     return null;
+      //   }
+      // };
 
-            // Decrypt phone if it exists
-            let decryptedPhone = appointment.phone_number;
-            if (appointment.phone_number) {
-              const { data: phoneResult } = await supabase.rpc('decrypt_sensitive_data', {
-                encrypted_data: appointment.phone_number
-              });
-              decryptedPhone = phoneResult || appointment.phone_number;
-            }
+      // DISABLED: console.log('🔓 Decrypting', data?.length || 0, 'appointments...');
+      // DISABLED: const decryptedAppointments = await Promise.all(
+      //   (data || []).map(async (appointment: any) => {
+      //     try {
+      //       let decryptedEmail = appointment.customer_email || appointment.email;
+      //       if (decryptedEmail) {
+      //         const emailResult = await decryptWithTimeout(decryptedEmail);
+      //         decryptedEmail = emailResult || decryptedEmail;
+      //       }
+      //       let decryptedPhone = appointment.customer_phone || appointment.phone_number;
+      //       if (decryptedPhone) {
+      //         const phoneResult = await decryptWithTimeout(decryptedPhone);
+      //         decryptedPhone = phoneResult || decryptedPhone;
+      //       }
+      //       return {
+      //         ...appointment,
+      //         email: decryptedEmail,
+      //         phone_number: decryptedPhone
+      //       };
+      //     } catch (decryptError) {
+      //       console.error('Error decrypting appointment data:', decryptError);
+      //       return {
+      //         ...appointment,
+      //         email: appointment.customer_email || appointment.email,
+      //         phone_number: appointment.customer_phone || appointment.phone_number
+      //       };
+      //     }
+      //   })
+      // );
 
-            return {
-              ...appointment,
-              email: decryptedEmail,
-              phone_number: decryptedPhone
-            };
-          } catch (decryptError) {
-            console.error('Error decrypting appointment data:', decryptError);
-            return appointment; // Return original data if decryption fails
-          }
-        })
-      );
+      // Use appointments as-is without decryption
+      const appointmentsToSet = (data || []).map((appointment: any) => ({
+        ...appointment,
+        email: appointment.customer_email || appointment.email,
+        phone_number: appointment.customer_phone || appointment.phone_number
+      }));
 
-      setAppointments(decryptedAppointments);
+      setAppointments(appointmentsToSet);
     } catch (error) {
       console.error('Error loading appointments:', error);
     } finally {
       setLoading(false);
+      loadingRef.current = false; // Reset ref to allow future calls
     }
   };
 
@@ -173,13 +342,13 @@ export const useAppointments = () => {
       console.error('Error clearing appointments:', error);
       return false;
     } finally {
+      loadingRef.current = false;
       setLoading(false);
     }
   };
 
-  useEffect(() => {
-    loadAppointments();
-  }, [user]);
+  // Don't auto-load appointments - let components call loadAppointments explicitly
+  // This prevents duplicate calls when components like ScheduleDetail call loadAppointments(selectedDate)
 
   return {
     appointments,

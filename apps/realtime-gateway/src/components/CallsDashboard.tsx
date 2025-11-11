@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import { useState, useEffect } from 'react';
+import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -27,7 +28,7 @@ interface CallsDashboardProps {
   calls: CallRecord[];
   onCallsUpdate?: () => void;
 }
-export const CallsDashboard: React.FC<CallsDashboardProps> = ({
+const CallsDashboardInner: React.FC<CallsDashboardProps> = ({
   calls,
   onCallsUpdate
 }) => {
@@ -85,11 +86,18 @@ export const CallsDashboard: React.FC<CallsDashboardProps> = ({
             organizationId: (user as any)?.organization_id,
           });
           
-          const { data, error } = await supabase.functions.invoke('transcribe-audio-v2', {
-            body: payload,
+          const { getApiUrl } = await import('@/utils/apiConfig');
+          const { data: sess } = await supabase.auth.getSession();
+          const token = sess.session?.access_token;
+          const resp = await fetch(getApiUrl(`/api/transcribe/call-record/${encodeURIComponent(call.id)}?enable_diarization=true`), {
+            method: 'POST',
+            headers: {
+              'Authorization': token ? `Bearer ${token}` : '',
+            },
           });
-          if (error) {
-            console.error('Transcription failed:', error);
+          const data = await resp.json().catch(() => null);
+          if (!resp.ok) {
+            console.error('Transcription failed:', data);
           } else {
             console.log('Transcription retry successful:', data);
             setTimeout(() => window.location.reload(), 2000);
@@ -114,11 +122,18 @@ export const CallsDashboard: React.FC<CallsDashboardProps> = ({
           organizationId: (user as any)?.organization_id,
         });
         
-        const { data, error } = await supabase.functions.invoke('transcribe-audio-v2', {
-          body: payload,
+        const { getApiUrl } = await import('@/utils/apiConfig');
+        const { data: sess } = await supabase.auth.getSession();
+        const token = sess.session?.access_token;
+        const resp = await fetch(getApiUrl(`/api/transcribe/call-record/${encodeURIComponent(call.id)}?enable_diarization=true`), {
+          method: 'POST',
+          headers: {
+            'Authorization': token ? `Bearer ${token}` : '',
+          },
         });
-        if (error) {
-          console.error('Transcription (storage) failed:', error);
+        const data = await resp.json().catch(() => null);
+        if (!resp.ok) {
+          console.error('Transcription (storage) failed:', data);
         } else {
           console.log('Transcription retry (storage) successful:', data);
           setTimeout(() => window.location.reload(), 2000);
@@ -139,6 +154,20 @@ export const CallsDashboard: React.FC<CallsDashboardProps> = ({
   const formatDate = (date: Date) => {
     return date.toLocaleString();
   };
+  // Persist scroll position within page for dashboard browsing
+  useEffect(() => {
+    const onScroll = () => {
+      try { sessionStorage.setItem('callsDashboardScroll', String(window.scrollY || 0)); } catch {}
+    };
+    window.addEventListener('scroll', onScroll);
+    // Restore once per mount
+    try {
+      const saved = sessionStorage.getItem('callsDashboardScroll');
+      if (saved) requestAnimationFrame(() => window.scrollTo(0, parseInt(saved, 10) || 0));
+    } catch {}
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
   return <Card>
       
       <CardContent>
@@ -219,7 +248,9 @@ export const CallsDashboard: React.FC<CallsDashboardProps> = ({
               </div>)}
           </div>}
 
-        <AudioPlayer call={selectedCall} isOpen={isPlayerOpen} onClose={() => setIsPlayerOpen(false)} onRetryTranscription={retryTranscription} onUpdateSpeakerMapping={updateSpeakerMapping} />
+        <AudioPlayer call={selectedCall} isOpen={isPlayerOpen} onClose={() => setIsPlayerOpen(false)} onRetryTranscription={retryTranscription} onUpdateSpeakerMapping={updateSpeakerMapping} persistKey={selectedCall?.id} />
       </CardContent>
     </Card>;
 };
+
+export const CallsDashboard = React.memo(CallsDashboardInner);

@@ -10,12 +10,15 @@ export interface ConversionProgress {
   progress: number;
 }
 
-const WAV_SIZE_THRESHOLD = 5 * 1024 * 1024; // 5MB threshold for conversion
+const WAV_SIZE_THRESHOLD = 50 * 1024 * 1024; // 50MB threshold - only convert if exceeding backend limit
 
 export const shouldConvertAudio = (file: Blob, fileName: string): boolean => {
+  // Skip conversion for now - backend accepts WAV files directly
+  // Conversion is slow and takes real-time duration of audio
+  // Only convert if file exceeds backend limit (100MB)
   const isWav = fileName.toLowerCase().endsWith('.wav') || file.type === 'audio/wav';
-  const isLarge = file.size > WAV_SIZE_THRESHOLD;
-  return isWav && isLarge;
+  const exceedsBackendLimit = file.size > (100 * 1024 * 1024); // 100MB backend limit
+  return isWav && exceedsBackendLimit;
 };
 
 export const convertAudioToWebM = async (

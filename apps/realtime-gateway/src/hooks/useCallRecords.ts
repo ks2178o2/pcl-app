@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { transcribeAudio } from '@/services/transcriptionService';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/use-toast';
+import { formatFileSize } from '@/services/audioConversionService';
 
 interface CallRecord {
   id: string;
@@ -25,93 +26,95 @@ export const useCallRecords = () => {
   const [calls, setCalls] = useState<CallRecord[]>([]);
   const { user } = useAuth();
   const { toast } = useToast();
+  const userRef = useRef(user);
+  
+  // Keep userRef updated with latest user value (update immediately, not in useEffect)
+  userRef.current = user;
 
   // Load calls from database on mount
   // Removed auto-load on user change - parent component now controls when to load with limit
 
-  const loadCalls = async (limit?: number) => {
-    if (!user) return;
+  const loadCalls = async (
+    limit?: number, 
+    filters?: {
+      call_category?: string;
+      call_type?: string[];
+    },
+    retryCount = 0
+  ) => {
+    // Use ref to get latest user value (avoids stale closure)
+    let currentUser = userRef.current;
     
-    console.log('🔄 Loading calls from database for user:', user.id, limit ? `(limit: ${limit})` : '');
+    // If user is not available, wait a bit and retry (up to 3 times)
+    if (!currentUser && retryCount < 3) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+      currentUser = userRef.current; // Check again after delay
+      
+      if (!currentUser) {
+        // Retry after another delay
+        return loadCalls(limit, retryCount + 1);
+      }
+    }
+    
+    if (!currentUser) {
+      return;
+    }
 
     try {
+      // Restore original working query pattern with proper chaining
       let query = supabase
         .from('call_records')
-        .select('*')
-        .eq('user_id', user.id)
-        .eq('is_active', true)
-        .order('created_at', { ascending: false });
+        .select('*')  // Try SELECT * like appointments
+        .eq('user_id', currentUser.id)
+        .eq('recording_complete', true);  // Use recording_complete instead of is_active
+      
+      // Apply filters if provided
+      if (filters) {
+        if (filters.call_category) {
+          query = query.eq('call_category', filters.call_category);
+        }
+        if (filters.call_type && filters.call_type.length > 0) {
+          query = query.in('call_type', filters.call_type);
+        }
+      }
       
       if (limit) {
         query = query.limit(limit);
       }
+      
+      query = query.order('start_time', { ascending: false });  // Use start_time instead of created_at
 
+      // Executing query
       const { data, error } = await query;
+      // Query completed
 
-      if (error) throw error;
+      if (error) {
+        console.error('❌ Error in loadCalls query:', error);
+        throw error;
+      }
+      
+      // Query returned records
 
-      console.log('✅ Successfully loaded', data.length, 'calls from database');
-
-      const formattedCalls: CallRecord[] = await Promise.all(data.map(async record => {
-        let audioBlob: Blob | undefined;
-        let derivedAudioPath: string | undefined = record.audio_file_url || undefined;
-        
-        // Try to fetch audio blob if URL exists
-        if (record.audio_file_url) {
-          try {
-            const { data: signedUrlData, error: signedUrlError } = await supabase.storage
-              .from('call-recordings')
-              .createSignedUrl(record.audio_file_url, 60 * 60); // 1 hour expiry
-
-            if (!signedUrlError && signedUrlData?.signedUrl) {
-              const response = await fetch(signedUrlData.signedUrl);
-              if (response.ok) {
-                audioBlob = await response.blob();
-              }
-            }
-          } catch (error) {
-            console.warn('Could not fetch audio for call:', record.id, error);
-          }
-        } else {
-          // No combined audio file yet — derive path from first uploaded chunk (common for short recordings)
-          try {
-            const { data: firstChunk } = await supabase
-              .from('call_chunks')
-              .select('file_path')
-              .eq('call_record_id', record.id)
-              .eq('upload_status', 'uploaded')
-              .order('chunk_number', { ascending: true })
-              .limit(1)
-              .maybeSingle();
-            if (firstChunk?.file_path) {
-              derivedAudioPath = firstChunk.file_path;
-            }
-          } catch (e) {
-            console.warn('Could not derive audio path from chunks for call:', record.id, e);
-          }
-        }
-
-        return {
-          id: record.id,
-          patientName: record.customer_name,
-          salespersonName: 'You', // Will be filled by parent component
-          duration: record.duration_seconds || 0,
-          timestamp: new Date(record.created_at),
-          status: 'completed' as const,
-          transcript: record.transcript || undefined,
-          audioBlob,
-          audioPath: derivedAudioPath,
-          diarizationSegments: (record as any).diarization_segments || [],
-          speakerMapping: (record as any).speaker_mapping || {},
-          diarizationConfidence: (record as any).diarization_confidence || 0,
-          numSpeakers: (record as any).num_speakers || 2,
-          patientId: (record as any).patient_id || undefined
-        };
+      // Format the data - simplified version without expensive audio fetching
+      const formattedCalls: CallRecord[] = (data || []).map(record => ({
+        id: record.id,
+        patientName: record.customer_name,
+        salespersonName: 'You', // Will be filled by parent component
+        duration: record.duration_seconds || 0,
+        timestamp: new Date(record.start_time || record.created_at),
+        status: 'completed' as const,
+        transcript: record.transcript || undefined,
+        audioPath: record.audio_file_url || undefined,
+        diarizationSegments: (record as any).diarization_segments || [],
+        speakerMapping: (record as any).speaker_mapping || {},
+        diarizationConfidence: (record as any).diarization_confidence || 0,
+        numSpeakers: (record as any).num_speakers || 2,
+        patientId: (record as any).patient_id || undefined
       }));
 
       setCalls(formattedCalls);
     } catch (error) {
-      console.error('❌ Error loading calls:', error);
+      console.error('Error loading calls:', error);
     }
   };
 
@@ -163,26 +166,52 @@ export const useCallRecords = () => {
 
       // Upload audio file to storage
       const fileName = `${user.id}/${data.id}.webm`;
-      console.log('📤 Uploading audio file:', fileName);
+      const fileSize = audioBlob.size;
+      const fileSizeFormatted = formatFileSize(fileSize);
       
+      console.log('📤 Uploading audio file to storage:', {
+        fileName,
+        path: fileName,
+        size: fileSize,
+        sizeFormatted: fileSizeFormatted,
+        contentType: 'audio/webm',
+        startedAt: new Date().toISOString()
+      });
+      
+      const storageUploadStartTime = Date.now();
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from('call-recordings')
         .upload(fileName, audioBlob, {
           contentType: 'audio/webm',
           upsert: true,
         });
+      const storageUploadEndTime = Date.now();
+      const storageUploadDuration = ((storageUploadEndTime - storageUploadStartTime) / 1000).toFixed(2);
 
       if (uploadError) {
-        console.error('❌ Audio upload failed:', uploadError);
+        console.error('❌ Audio upload failed:', {
+          error: uploadError,
+          fileName,
+          size: fileSizeFormatted,
+          duration: `${storageUploadDuration}s`
+        });
       } else {
-        console.log('✅ Audio uploaded successfully:', uploadData.path);
+        const uploadSpeed = parseFloat(storageUploadDuration) > 0 
+          ? `${(fileSize / 1024 / 1024 / parseFloat(storageUploadDuration)).toFixed(2)} MB/s`
+          : 'N/A';
+        console.log('✅ Audio uploaded successfully:', {
+          path: uploadData.path,
+          size: fileSizeFormatted,
+          duration: `${storageUploadDuration}s`,
+          speed: uploadSpeed,
+          completedAt: new Date(storageUploadEndTime).toISOString()
+        });
         
         // Update database with audio file URL and mark as ready for transcription
         const { error: updateError } = await supabase
           .from('call_records')
           .update({
             chunks_uploaded: 1,
-            status: 'ready_for_transcription',
             audio_file_url: uploadData.path 
           })
           .eq('id', data.id);
@@ -200,11 +229,53 @@ export const useCallRecords = () => {
         call.id === newCall.id ? updatedCall : call
       ));
 
-      console.log('🎤 Starting transcription for call:', data.id);
+      console.log('🎤 Checking if transcription is needed for call:', data.id);
 
       // Start transcription in the background - wrap in setTimeout to prevent stack overflow
       setTimeout(async () => {
         try {
+          // First, check if transcription is already in progress or completed
+          // Note: Use * to select all columns to avoid potential RLS issues with specific column selection
+          const { data: existingRecord, error: queryError } = await supabase
+            .from('call_records')
+            .select('*')
+            .eq('id', data.id)
+            .maybeSingle(); // Use maybeSingle instead of single to handle missing records gracefully
+          
+          // Handle query errors gracefully
+          if (queryError) {
+            console.warn('Error checking existing transcript:', queryError);
+            // Continue with transcription attempt if query fails
+          }
+          
+          if (existingRecord) {
+            const existingTranscript = existingRecord.transcript;
+            const hasTranscriptionProvider = !!existingRecord?.transcription_provider;
+            
+            // Check if transcript is already ready (not placeholder)
+            const isTranscriptReady = existingTranscript && 
+                                     typeof existingTranscript === 'string' &&
+                                     existingTranscript.trim() !== '' &&
+                                     existingTranscript.trim() !== 'Transcribing audio...' &&
+                                     !existingTranscript.toLowerCase().includes('failed') &&
+                                     existingTranscript.trim().length > 20;
+            
+            // Check if transcription is already in progress
+            const isTranscriptionInProgress = existingTranscript === 'Transcribing audio...' && hasTranscriptionProvider;
+            
+            if (isTranscriptReady) {
+              console.log('✅ Transcription already completed for call:', data.id);
+              return; // Don't start new transcription
+            }
+            
+            if (isTranscriptionInProgress) {
+              console.log('⏳ Transcription already in progress for call:', data.id, '- skipping duplicate request');
+              return; // Don't start duplicate transcription
+            }
+          }
+          
+          console.log('🎤 Starting transcription for call:', data.id);
+          
           // Import helper
           const { buildTranscriptionPayload } = await import('@/utils/transcriptionUtils');
           
@@ -212,54 +283,62 @@ export const useCallRecords = () => {
           
           let transcriptionResult: any, transcriptionError: any;
           
-          if (storagePath) {
-            // Prefer server-side fetch from storage to avoid large payloads
-            const payload = await buildTranscriptionPayload({
-              storagePath,
-              callId: data.id,
-              salespersonName,
-              customerName: patientName,
-              organizationId: (user as any)?.organization_id,
+          // Replace edge function call with backend proxy for portability
+          const { getApiUrl } = await import('@/utils/apiConfig');
+          const form = new FormData();
+          form.append('file', audioBlob, 'recording.webm');
+          form.append('provider', 'deepgram');
+          form.append('salesperson_name', salespersonName);
+          form.append('customer_name', patientName);
+          form.append('enable_diarization', 'true');  // Enable diarization by default
+
+          try {
+            const { data: sessionData } = await supabase.auth.getSession();
+            const token = sessionData?.session?.access_token;
+            const resp = await fetch(getApiUrl('/api/transcribe/upload'), {
+              method: 'POST',
+              headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+              body: form,
             });
-            
-            ({ data: transcriptionResult, error: transcriptionError } = await supabase.functions.invoke('transcribe-audio-v2', {
-              body: payload,
-            }));
-          } else {
-            // Fallback: convert blob to base64 and send directly
-            const convertBlobToBase64 = async (blob: Blob) => {
-              const arrayBuffer = await blob.arrayBuffer();
-              const uint8Array = new Uint8Array(arrayBuffer);
-              let base64String = '';
-              const chunkSize = 8192;
-              for (let i = 0; i < uint8Array.length; i += chunkSize) {
-                const chunk = uint8Array.slice(i, i + chunkSize);
-                base64String += btoa(String.fromCharCode(...chunk));
+            if (!resp.ok) {
+              throw new Error(`Backend upload failed: ${resp.status}`);
+            }
+            const respJson = await resp.json();
+            const uploadId = respJson?.upload_id || respJson?.transcript_job_id;
+            console.log('✅ Backend transcription queued', uploadId);
+
+            // Poll backend status until completed, then persist transcript into call_records and run analysis
+            if (uploadId && token) {
+              const maxMs = 120000; // 2 minutes
+              const intervalMs = 2000;
+              const start = Date.now();
+              let transcriptText: string | null = null;
+              for (;;) {
+                const statusResp = await fetch(getApiUrl(`/api/transcribe/status/${uploadId}`), {
+                  headers: { Authorization: `Bearer ${token}` },
+                });
+                if (statusResp.ok) {
+                  const statusJson = await statusResp.json();
+                  if (statusJson?.status === 'completed' && statusJson?.transcript) {
+                    transcriptText = statusJson.transcript as string;
+                    break;
+                  }
+                  if (statusJson?.status === 'failed') {
+                    throw new Error(statusJson?.error || 'Transcription failed');
+                  }
+                }
+                if (Date.now() - start > maxMs) break;
+                await new Promise(r => setTimeout(r, intervalMs));
               }
-              return base64String;
-            };
-            const audioBase64 = await convertBlobToBase64(audioBlob);
-            
-            const payload = await buildTranscriptionPayload({
-              audioBase64,
-              callId: data.id,
-              salespersonName,
-              customerName: patientName,
-              organizationId: (user as any)?.organization_id,
-            });
-            
-            ({ data: transcriptionResult, error: transcriptionError } = await supabase.functions.invoke('transcribe-audio-v2', {
-              body: payload,
-            }));
+
+              if (transcriptText) {
+                await updateCallInDatabase(data.id, { transcript: transcriptText, status: 'completed' });
+              }
+            }
+          } catch (e) {
+            console.error('❌ Failed to queue backend transcription:', e);
           }
-          
-          if (transcriptionError || !transcriptionResult?.success) {
-            throw new Error(transcriptionResult?.error || 'Transcription failed');
-          }
-          
-          const transcript = transcriptionResult.transcript;
-          console.log('✅ Transcription completed, updating database for call:', data.id);
-          await updateCallInDatabase(data.id, { transcript, status: 'completed' });
+          // Keep existing DB record; transcript will be updated by subsequent flows
           
           // After successful transcription, trigger analysis in background
           console.log('🔍 Starting background analysis for call:', data.id);
@@ -268,23 +347,16 @@ export const useCallRecords = () => {
               // Fetch the complete call record to get diarization_segments
               const { data: callData, error: fetchError } = await supabase
                 .from('call_records')
-                .select('transcript, diarization_segments, speaker_mapping')
+                .select('transcript')
                 .eq('id', data.id)
-                .single();
+                .maybeSingle();
               
               if (fetchError || !callData) {
                 throw new Error('Failed to fetch call data for analysis');
               }
 
               // Generate formatted transcript from diarization segments if available
-              let formattedTranscript = callData.transcript;
-              if (callData.diarization_segments && callData.speaker_mapping) {
-                const { generateMappedTranscript } = await import('@/utils/speakerUtils');
-                formattedTranscript = generateMappedTranscript(
-                  callData.diarization_segments as any[],
-                  callData.speaker_mapping as Record<string, string>
-                );
-              }
+              const formattedTranscript = callData.transcript;
 
               const { transcriptAnalysisService } = await import('@/services/transcriptAnalysisService');
               await transcriptAnalysisService.analyzeTranscript(

@@ -403,3 +403,4 @@ pnpm-lock.yaml
 local/
 .elasticbeanstalk/app_versions/
 !apps/realtime-gateway/src/lib/
+apps/app-api/.env.test

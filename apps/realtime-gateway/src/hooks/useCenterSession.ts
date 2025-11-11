@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAuth } from './useAuth';
 import { useOrganizationData } from './useOrganizationData';
 import { useProfile } from './useProfile';
@@ -22,21 +22,57 @@ export const useCenterSession = () => {
     error: null,
     hasShownInitialSelection: false,
   });
+  
+  // Track initialization to prevent duplicate calls
+  const lastInitKeyRef = useRef<string | null>(null);
+  const initializingRef = useRef(false);
+  
+  // Extract stable primitives for dependencies
+  const userId = user?.id;
+  const profileId = profile?.id;
+  const centersKey = centers.map(c => c.id).join(',');
+  const assignmentsKey = assignments.map(a => a.id).join(',');
+  
+  // Create a stable key that changes only when relevant data changes
+  const initKey = userId && profileId && !orgLoading && centers.length > 0
+    ? `${userId}-${profileId}-${centersKey}-${assignmentsKey}`
+    : null;
 
   useEffect(() => {
-    if (user && profile && !orgLoading && centers.length > 0) {
-      initializeCenterSession();
+    if (!initKey) {
+      // Reset state if dependencies not ready
+      if (sessionState.loading !== true || sessionState.availableCenters.length > 0) {
+        setSessionState(prev => ({
+          ...prev,
+          loading: orgLoading,
+          availableCenters: [],
+        }));
+      }
+      return;
     }
-  }, [user, profile, centers, assignments, orgLoading]);
+
+    // Skip if already initializing or if we've already initialized with this key
+    if (initializingRef.current || lastInitKeyRef.current === initKey) {
+      return;
+    }
+
+    initializeCenterSession();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initKey, orgLoading]);
 
   const initializeCenterSession = () => {
+    if (!userId || !profileId) return;
+    
+    initializingRef.current = true;
+    lastInitKeyRef.current = initKey || null;
+    
     try {
-      console.log('Initializing center session for user:', user?.id);
+      console.log('Initializing center session for user:', userId);
       console.log('Available centers:', centers);
       console.log('User assignments:', assignments);
       
       // Get user's assigned centers
-      const userAssignments = assignments.filter(assignment => assignment.user_id === user?.id);
+      const userAssignments = assignments.filter(assignment => assignment.user_id === userId);
       console.log('User assignments for this user:', userAssignments);
       
       let availableCenters;
@@ -110,6 +146,8 @@ export const useCenterSession = () => {
         error: 'Failed to load center information.',
         hasShownInitialSelection: false,
       });
+    } finally {
+      initializingRef.current = false;
     }
   };
 

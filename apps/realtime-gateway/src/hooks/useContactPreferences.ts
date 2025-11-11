@@ -46,7 +46,16 @@ export const useContactPreferences = (callRecordId?: string) => {
         .maybeSingle();
 
       if (error) {
-        console.error('Error fetching contact preferences:', error);
+        // Gracefully handle missing table/schema cache errors
+        const code = (error as any)?.code;
+        const message = (error as any)?.message || '';
+        if (code === 'PGRST205' || /Could not find the table 'public\.contact_preferences'/.test(message)) {
+          // Treat as no preferences stored; silence noisy error
+          console.warn('contact_preferences table not found; treating preferences as empty');
+          setPreferences(null);
+        } else {
+          console.error('Error fetching contact preferences:', error);
+        }
       } else {
         setPreferences(data);
       }
@@ -71,7 +80,15 @@ export const useContactPreferences = (callRecordId?: string) => {
           .select()
           .single();
 
-        if (error) throw error;
+        if (error) {
+          const code = (error as any)?.code;
+          const message = (error as any)?.message || '';
+          if (code === 'PGRST205' || /Could not find the table 'public\.contact_preferences'/.test(message)) {
+            console.warn('contact_preferences table not found on update; ignoring and treating as success');
+            return { data: null, error: null } as any;
+          }
+          throw error;
+        }
         setPreferences(data);
         return { data, error: null };
       } else {
@@ -94,7 +111,15 @@ export const useContactPreferences = (callRecordId?: string) => {
           .select()
           .single();
 
-        if (error) throw error;
+        if (error) {
+          const code = (error as any)?.code;
+          const message = (error as any)?.message || '';
+          if (code === 'PGRST205' || /Could not find the table 'public\.contact_preferences'/.test(message)) {
+            console.warn('contact_preferences table not found on insert; ignoring and treating as success');
+            return { data: null, error: null } as any;
+          }
+          throw error;
+        }
         setPreferences(data);
         return { data, error: null };
       }

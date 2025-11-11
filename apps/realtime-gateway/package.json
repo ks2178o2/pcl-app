@@ -15,6 +15,11 @@
     "test:watch": "vitest --watch",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:integration:ci": "vitest run --config vitest.integration.config.ts --coverage --reporter=junit --outputFile=integration-test-results.xml",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:debug": "playwright test --debug",
+    "test:e2e:report": "playwright show-report",
     "clean": "rm -rf dist",
     "preview": "vite preview"
   },
@@ -56,6 +61,7 @@
     "lucide-react": "^0.294.0",
     "next-themes": "^0.4.6",
     "react": "^18.2.0",
+    "react-day-picker": "^9.11.1",
     "react-dom": "^18.2.0",
     "react-hook-form": "^7.47.0",
     "react-router-dom": "^6.17.0",
@@ -67,6 +73,7 @@
     "zod": "^3.22.4"
   },
   "devDependencies": {
+    "@playwright/test": "^1.56.1",
     "@testing-library/jest-dom": "^6.0.0",
     "@testing-library/react": "^14.0.0",
     "@testing-library/user-event": "^14.0.0",

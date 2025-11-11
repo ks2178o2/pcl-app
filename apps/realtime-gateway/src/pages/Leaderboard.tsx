@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useProfile } from '@/hooks/useProfile';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Trophy, TrendingUp, Award, Sparkles } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 
@@ -18,12 +19,13 @@ export default function Leaderboard() {
   const { profile, loading: profileLoading } = useProfile();
   const [metrics, setMetrics] = useState<SalespersonMetric[]>([]);
   const [loading, setLoading] = useState(true);
+  const [filterCallType, setFilterCallType] = useState<string>('all');
 
   useEffect(() => {
     if (profile?.organization_id) {
       fetchLeaderboardData();
     }
-  }, [profile]);
+  }, [profile, filterCallType]);
 
   const fetchLeaderboardData = async () => {
     if (!profile?.organization_id) return;
@@ -42,24 +44,36 @@ export default function Leaderboard() {
       const thirtyDaysAgo = new Date();
       thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
-      const { data: callRecords, error: recordsError } = await supabase
+      let callRecordsQuery = supabase
         .from('call_records')
-        .select('user_id')
+        .select('user_id, call_type, call_category')
         .eq('organization_id', profile.organization_id)
         .gte('created_at', thirtyDaysAgo.toISOString());
+      
+      // Apply call_type filter if not 'all'
+      if (filterCallType && filterCallType !== 'all') {
+        callRecordsQuery = callRecordsQuery.eq('call_type', filterCallType);
+      }
+      
+      const { data: callRecords, error: recordsError } = await callRecordsQuery;
 
       if (recordsError) throw recordsError;
 
       // Calculate metrics for each salesperson
       const metricsData: SalespersonMetric[] = profiles?.map(p => {
-        const recordings = callRecords?.filter(r => r.user_id === p.user_id).length || 0;
+        const userCalls = callRecords?.filter(r => r.user_id === p.user_id) || [];
+        const recordings = userCalls.length;
+        
+        // Calculate success rate for this user's calls
+        const scheduled = userCalls.filter(c => c.call_category === 'consult_scheduled').length;
+        const successRate = recordings > 0 ? Math.round((scheduled / recordings) * 100) : 0;
         
         return {
           userId: p.user_id,
           name: p.salesperson_name || 'Unknown',
           recordings30Days: recordings,
-          placeholderMetric1: Math.floor(Math.random() * 100), // Placeholder
-          placeholderMetric2: Math.floor(Math.random() * 100), // Placeholder
+          placeholderMetric1: successRate, // Success rate
+          placeholderMetric2: scheduled, // Scheduled count
           rank: 0
         };
       }) || [];
@@ -117,13 +131,36 @@ export default function Leaderboard() {
       </div>
 
       <div className="relative z-10">
-        <div className="flex items-center gap-3 mb-6">
-          <Trophy className="h-10 w-10 text-primary" />
-          <div>
-            <h1 className="text-4xl font-bold bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent">
-              Sales Leaderboard
-            </h1>
-            <p className="text-muted-foreground">Top performers in the last 30 days</p>
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-3">
+            <Trophy className="h-10 w-10 text-primary" />
+            <div>
+              <h1 className="text-4xl font-bold bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent">
+                Sales Leaderboard
+              </h1>
+              <p className="text-muted-foreground">Top performers in the last 30 days</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-sm font-medium">Filter by Call Type:</label>
+            <Select value={filterCallType} onValueChange={setFilterCallType}>
+              <SelectTrigger className="w-48">
+                <SelectValue placeholder="All Types" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Types</SelectItem>
+                <SelectItem value="scheduling">Scheduling</SelectItem>
+                <SelectItem value="pricing">Pricing</SelectItem>
+                <SelectItem value="directions">Directions</SelectItem>
+                <SelectItem value="billing">Billing</SelectItem>
+                <SelectItem value="complaint">Complaint</SelectItem>
+                <SelectItem value="transfer_to_office">Transfer to Office</SelectItem>
+                <SelectItem value="general_question">General Question</SelectItem>
+                <SelectItem value="reschedule">Reschedule</SelectItem>
+                <SelectItem value="confirming_existing_appointment">Confirming Appointment</SelectItem>
+                <SelectItem value="cancellation">Cancellation</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </div>
 

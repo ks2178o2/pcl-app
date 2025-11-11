@@ -109,7 +109,9 @@ export default function SystemCheck() {
 
     for (const funcCheck of functionChecks) {
       try {
-        const response = await fetch(`https://xmeudrelqrityernpazp.supabase.co/functions/v1/${funcCheck.name}`, {
+        // Use Supabase URL from environment or fallback to client URL
+        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || "https://xxdahmkfioqzgqvyabek.supabase.co";
+        const response = await fetch(`${supabaseUrl}/functions/v1/${funcCheck.name}`, {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${session?.access_token}`,
@@ -288,8 +290,8 @@ export default function SystemCheck() {
 
     // Check Backend API
     try {
-      const apiUrl = (import.meta as any)?.env?.VITE_API_URL || 'http://localhost:8000';
-      const response = await fetch(`${apiUrl}/health`);
+      const { getApiUrl } = await import('@/utils/apiConfig');
+      const response = await fetch(getApiUrl('/health'));
       const data = await response.json();
       results.push({
         name: 'Backend API',
@@ -302,14 +304,14 @@ export default function SystemCheck() {
         name: 'Backend API',
         status: 'warning',
         message: 'Backend API not accessible',
-        details: err instanceof Error ? err.message : 'Ensure backend is running on port 8000'
+        details: err instanceof Error ? err.message : 'Ensure backend is running'
       });
     }
 
     // Check RAG Feature Toggles API
     try {
-      const apiUrl = (import.meta as any)?.env?.VITE_API_URL || 'http://localhost:8000';
-      const response = await fetch(`${apiUrl}/api/v1/rag-features/catalog?is_active=true`);
+      const { getApiUrl } = await import('@/utils/apiConfig');
+      const response = await fetch(getApiUrl('/api/v1/rag-features/catalog?is_active=true'));
       results.push({
         name: 'RAG Features API',
         status: response.ok ? 'pass' : 'warning',

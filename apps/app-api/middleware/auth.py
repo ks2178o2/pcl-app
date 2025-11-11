@@ -49,11 +49,18 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
         email = auth_response.user.email
         
         # Get profile with organization info
-        profile_result = supabase_client.table("profiles").select(
-            "organization_id, salesperson_name"
-        ).eq("user_id", user_id).single().execute()
+        # Fetch profile; tolerate duplicate rows by picking the most recent
+        profile_result = (
+            supabase_client
+            .table("profiles")
+            .select("organization_id, salesperson_name, created_at")
+            .eq("user_id", user_id)
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
         
-        profile = profile_result.data if profile_result.data else {}
+        profile = (profile_result.data[0] if isinstance(profile_result.data, list) and profile_result.data else profile_result.data) or {}
         organization_id = profile.get('organization_id')
         full_name = profile.get('salesperson_name')
         

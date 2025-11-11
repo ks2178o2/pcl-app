@@ -8,7 +8,7 @@ import { AudioControls } from '@/components/AudioControls';
 import { Mic, Square, RefreshCw, CheckCircle, AlertCircle, Clock, Trash2, Play, Pause, Volume2, Upload as UploadIcon } from 'lucide-react';
 import { ChunkedRecordingManager, RecordingProgress, formatDuration } from '@/services/chunkedRecordingService';
 import { useToast } from '@/components/ui/use-toast';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { useProfile } from '@/hooks/useProfile';
 
 interface ChunkedAudioRecorderProps {
@@ -17,6 +17,7 @@ interface ChunkedAudioRecorderProps {
   patientName?: string;
   patientId?: string;
   centerId?: string;
+  autoStart?: boolean;
 }
 
 export const ChunkedAudioRecorder: React.FC<ChunkedAudioRecorderProps> = ({
@@ -24,7 +25,8 @@ export const ChunkedAudioRecorder: React.FC<ChunkedAudioRecorderProps> = ({
   disabled = false,
   patientName,
   patientId,
-  centerId
+  centerId,
+  autoStart = false
 }) => {
   const [progress, setProgress] = useState<RecordingProgress>({
     currentChunk: 0,
@@ -53,13 +55,41 @@ export const ChunkedAudioRecorder: React.FC<ChunkedAudioRecorderProps> = ({
     console.log('🧹 Checking for orphaned media streams on mount');
     
     // Stop any existing media streams that might be lingering
-    navigator.mediaDevices.enumerateDevices().then(() => {
-      // This triggers cleanup of any getUserMedia streams that are still active
+    // Defensive check for test environments where navigator.mediaDevices might not be available
+    if (navigator?.mediaDevices?.enumerateDevices) {
+      try {
+        // Call enumerateDevices directly on mediaDevices to avoid "Illegal invocation" error
+        // The method must be called with the correct 'this' context
+        const result = navigator.mediaDevices.enumerateDevices();
+        if (result && typeof result.then === 'function') {
+          result.then(() => {
+            // This triggers cleanup of any getUserMedia streams that are still active
+            if (recordingManagerRef.current) {
+              recordingManagerRef.current.cleanup(true);
+              console.log('✅ Pre-mount cleanup completed');
+            }
+          }).catch((err: any) => console.warn('Could not enumerate devices:', err));
+        } else {
+          // Result is not a promise, do cleanup immediately
+          if (recordingManagerRef.current) {
+            recordingManagerRef.current.cleanup(true);
+            console.log('✅ Pre-mount cleanup completed');
+          }
+        }
+      } catch (err) {
+        console.warn('Error enumerating devices:', err);
+        // Fall through to cleanup
+        if (recordingManagerRef.current) {
+          recordingManagerRef.current.cleanup(true);
+        }
+      }
+    } else {
+      // In test environments or when mediaDevices is not available, still try cleanup
       if (recordingManagerRef.current) {
         recordingManagerRef.current.cleanup(true);
-        console.log('✅ Pre-mount cleanup completed');
+        console.log('✅ Pre-mount cleanup completed (no mediaDevices available)');
       }
-    }).catch(err => console.warn('Could not enumerate devices:', err));
+    }
 
     // Check for existing recording state and auto-resume
     const existingState = ChunkedRecordingManager.loadState();
@@ -162,6 +192,18 @@ export const ChunkedAudioRecorder: React.FC<ChunkedAudioRecorderProps> = ({
       });
     }
   }, [progress.errorMessage, toast]);
+
+  // Auto-start recording if autoStart prop is true
+  useEffect(() => {
+    if (autoStart && !disabled && patientName?.trim() && !progress.isRecording && !callRecordId) {
+      // Small delay to ensure component is fully mounted
+      const timer = setTimeout(() => {
+        startRecording();
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoStart, disabled, patientName]);
 
   const startRecording = async () => {
     if (!patientName?.trim()) {
@@ -438,20 +480,47 @@ export const ChunkedAudioRecorder: React.FC<ChunkedAudioRecorderProps> = ({
       }
 
       const invoke = async (prov: string) => {
-        const clientTraceId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2,8)}`;
-        return await supabase.functions.invoke('transcribe-audio-v2', {
-          body: {
-            callId: callRecordId,
-            salespersonName,
-            customerName: patientName.trim(),
-            provider: prov,
-            clientTraceId,
-          },
-        });
+        const { getApiUrl } = await import('@/utils/apiConfig');
+        const { data: sess } = await supabase.auth.getSession();
+        const token = sess.session?.access_token;
+        const resp = await fetch(getApiUrl(`/api/transcribe/call-record/${encodeURIComponent(callRecordId)}?enable_diarization=true&provider=${encodeURIComponent(prov)}`),
+          {
+            method: 'POST',
+            headers: {
+              'Authorization': token ? `Bearer ${token}` : '',
+            },
+          }
+        );
+        const data = await resp.json().catch(() => null);
+        const error = resp.ok ? null : new Error(data?.detail || resp.statusText);
+        return { data, error } as any;
+      };
+
+      // Retry helper for 409 not_ready
+      const invokeWithRetry = async (prov: string, maxRetries = 3) => {
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+          const { data, error } = await invoke(prov);
+          
+          // If not ready, wait and retry
+          if (data?.not_ready === true && attempt < maxRetries) {
+            console.log(`⏳ Attempt ${attempt}: Not ready yet, retrying in 2s...`);
+            toast({ 
+              title: 'Finalizing recording', 
+              description: `Waiting for all chunks... (attempt ${attempt}/${maxRetries})` 
+            });
+            await new Promise(r => setTimeout(r, 2000));
+            continue;
+          }
+          
+          return { data, error };
+        }
+        
+        // Max retries exceeded
+        throw new Error('Recording not ready after multiple attempts');
       };
 
       toast({ title: 'Starting transcription', description: `Using ${provider === 'deepgram' ? 'Deepgram' : 'AssemblyAI'}` });
-      let { data, error } = await invoke(provider);
+      let { data, error } = await invokeWithRetry(provider);
 
       // Check for 404 - function not deployed
       if (error?.message?.includes('404') || error?.message?.includes('not found')) {
@@ -486,9 +555,9 @@ export const ChunkedAudioRecorder: React.FC<ChunkedAudioRecorderProps> = ({
         console.log('Transcription attempt 2 (AssemblyAI):', { success: data?.success, error: error?.message });
       }
 
-      // If chunked assembly approach failed, fallback to direct audio upload
+      // If the API call failed, attempt local fallback transcription
       if (error || !data?.success) {
-        console.log('Chunked transcription failed, trying direct audio upload fallback...');
+        console.log('Server transcription failed, trying local transcription fallback...');
         toast({ title: 'Trying alternative approach', description: 'Assembling audio locally...' });
         
         try {
@@ -523,8 +592,9 @@ export const ChunkedAudioRecorder: React.FC<ChunkedAudioRecorderProps> = ({
             }
           }
 
-          // Combine all chunks into single blob
-          const combinedBlob = new Blob(audioBlobs, { type: 'audio/webm' });
+          // Combine all chunks into single blob using proper re-encoding
+          const { reencodeAudioSlices } = await import('@/services/audioReencodingService');
+          const combinedBlob = await reencodeAudioSlices(audioBlobs);
           
           // Convert to base64
           const base64Audio = await new Promise<string>((resolve, reject) => {
@@ -537,33 +607,7 @@ export const ChunkedAudioRecorder: React.FC<ChunkedAudioRecorderProps> = ({
             reader.readAsDataURL(combinedBlob);
           });
 
-          // Try transcription with direct base64 audio
-          const clientTraceId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2,8)}`;
-          const directResult = await supabase.functions.invoke('transcribe-audio-v2', {
-            body: {
-              // Provide multiple key formats for compatibility with the edge function
-              audioBase64: base64Audio,
-              audio_base64: base64Audio,
-              mimeType: combinedBlob.type || 'audio/webm',
-              callId: callRecordId,
-              call_id: callRecordId,
-              salespersonName,
-              salesperson_name: salespersonName,
-              customerName: patientName.trim(),
-              customer_name: patientName.trim(),
-              provider,
-              clientTraceId,
-            },
-          });
-
-          // Display requestId if available
-          if (directResult.data?.requestId) {
-            console.log(`📋 Direct transcription request ID: ${directResult.data.requestId}`);
-          }
-
-          if (directResult.error || !directResult.data?.success) {
-            console.warn('Direct audio transcription failed, attempting local transcription...');
-            try {
+          try {
               const { transcribeAudio } = await import('@/services/transcriptionService');
               const localTranscript = await transcribeAudio(
                 combinedBlob,
@@ -582,8 +626,6 @@ export const ChunkedAudioRecorder: React.FC<ChunkedAudioRecorderProps> = ({
                 }
                 data = { success: true, transcript: localTranscript, provider: 'local' } as any;
                 error = null;
-              } else {
-                throw new Error(typeof localTranscript === 'string' ? localTranscript : 'Local transcription failed');
               }
             } catch (localErr) {
               console.error('Local transcription fallback failed:', localErr);
@@ -591,10 +633,6 @@ export const ChunkedAudioRecorder: React.FC<ChunkedAudioRecorderProps> = ({
                 `Both chunked and direct transcription failed, and local fallback also failed: ${localErr instanceof Error ? localErr.message : 'Unknown error'}`
               );
             }
-          } else {
-            data = directResult.data;
-            error = null;
-          }
         } catch (fallbackError) {
           console.error('Fallback transcription failed:', fallbackError);
           throw new Error(`Both chunked and direct transcription failed. Last error: ${fallbackError instanceof Error ? fallbackError.message : 'Unknown error'}`);
@@ -935,9 +973,9 @@ export const ChunkedAudioRecorder: React.FC<ChunkedAudioRecorderProps> = ({
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Finish recording?</DialogTitle>
+              <DialogDescription>Choose what to do with this recording.</DialogDescription>
             </DialogHeader>
             <div className="space-y-3">
-              <p className="text-sm text-muted-foreground">Choose what to do with this recording.</p>
               <div className="flex gap-2">
                 <Button onClick={handleResumeRecording} variant="secondary" className="flex-1">
                   <Play className="h-4 w-4 mr-2" /> Resume recording
@@ -959,6 +997,9 @@ export const ChunkedAudioRecorder: React.FC<ChunkedAudioRecorderProps> = ({
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Resume Previous Recording?</DialogTitle>
+              <DialogDescription>
+                We couldn't automatically resume your recording. Would you like to try again or start fresh?
+              </DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
               <Alert>
